@@ -1,7 +1,7 @@
-diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
+diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/drv_lan865x.h b/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/drv_lan865x.h
 index fd8f641..78eb328 100644
---- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
-+++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
+--- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/drv_lan865x.h
++++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/drv_lan865x.h
 @@ -110,6 +110,15 @@ typedef struct _DRV_LAN865X_Configuration
  
      bool rxCutThrough;

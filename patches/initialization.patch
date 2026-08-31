@@ -1,7 +1,7 @@
-diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/initialization.c b/apps/tcpip_iperf_lan865x/firmware/src/config/default/initialization.c
+diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/initialization.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/initialization.c
 index e326f7c..101ca04 100644
---- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/initialization.c
-+++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/initialization.c
+--- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/initialization.c
++++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/initialization.c
 @@ -46,6 +46,11 @@
  #include "configuration.h"
  #include "definitions.h"

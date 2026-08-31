@@ -14,7 +14,7 @@ python patches/apply_patches.py            # apply whatever is missing
 ```
 
 Or, from Windows/Explorer/Git Bash, `patches\apply_patches.bat` (same arguments,
-reuses the sister project's `.venv` like `..\cli.bat`/`..\flash.bat` do, falls
+uses this project's own `.venv` like `..\cli.bat`/`..\flash.bat` do, falls
 back to the bare `python` from PATH).
 
 Run `--check` first after every `Generate Code`. A clean report (`All patches
@@ -64,6 +64,7 @@ still pristine MCC output, before any hand-patch to it):
 | `initialization.patch` | `e569c7e` |
 | `sys_command.patch` | `a23af6c` |
 | `telnet.patch` | `a23af6c` |
+| `tcpip_mac_bridge.patch` | `0dc62ac` |
 
 (`drv_lan865x_api.patch`'s baseline already contains the `stdarg.h` fix for that
 file, bundled into that commit - that's why `stdarg.h` is handled separately, not

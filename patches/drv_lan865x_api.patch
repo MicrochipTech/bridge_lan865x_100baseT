@@ -1,7 +1,7 @@
-diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
+diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
 index c2304fe..8cc50be 100644
---- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
-+++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
+--- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
++++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
 @@ -700,6 +700,20 @@ TCPIP_MAC_RES DRV_LAN865X_PacketTx(DRV_HANDLE hMac, TCPIP_MAC_PACKET * ptrPacket
      pDrvInst = pClient->pDrvInst;
      SYS_ASSERT(pDrvInst && (LAN865X_MAGIC == pDrvInst->magic), "Driver info pointer is invalid");

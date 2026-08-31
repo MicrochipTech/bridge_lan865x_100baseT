@@ -1,7 +1,7 @@
-diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/library/tcpip/src/telnet.c b/apps/tcpip_iperf_lan865x/firmware/src/config/default/library/tcpip/src/telnet.c
+diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/telnet.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/telnet.c
 index 0f4aad1..6807e1e 100644
---- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/library/tcpip/src/telnet.c
-+++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/library/tcpip/src/telnet.c
+--- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/telnet.c
++++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/telnet.c
 @@ -41,6 +41,7 @@ Microchip or any third party.
  #include <stdarg.h>
  #include "net_pres/pres/net_pres_socketapi.h"
