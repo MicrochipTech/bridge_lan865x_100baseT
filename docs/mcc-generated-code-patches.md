@@ -39,11 +39,12 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 6 | `driver\lan865x\src\dynamic\drv_lan865x_api.c` + `library\tcpip\src\telnet.c` — `#include <stdarg.h>` | Build fails outright (`implicit declaration of function 'va_start'`) | **Critical — build blocker**, but easy to spot and re-add |
 | 7 | `system\command\src\sys_command.c` — CR NUL line-ending handling | Every Telnet command after the first one in a session silently fails ("Please type in a command") | High — correctness, Telnet-only |
 | 8 | `library\tcpip\src\telnet.c` — `F_Telnet_MSG()` real backpressure | Large command output over Telnet (e.g. `dump`, `netinfo`) truncates instead of completing | Medium — correctness, Telnet-only |
+| 9 | `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction | T1S→100BASE-T TCP forwarding stalls after the first near-MTU-size segment; legitimate large frames silently rejected (`failMtu`) | High — correctness, forwarding-path |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
 Recommended re-apply order after any `Generate Code` run: **1 first** (nothing else
 matters if the board can't boot), then rebuild/flash/confirm it boots at all, then
-**2–5, 7** in any order, rebuild/flash/retest once more. **6** will simply fail to
+**2–5, 7, 9** in any order, rebuild/flash/retest once more. **6** will simply fail to
 compile if missed, so the build itself catches it — no separate verification needed.
 
 ---
@@ -461,6 +462,84 @@ bytes, ~1.8–5.3s, vs. truncating at ~3072 bytes before) and with `netinfo`;
 `dump 0x20000000 32000` re-run 5x back-to-back after the write-retry fix came
 back byte-identical (158065 bytes, zero glued lines) every time, vs. varying
 every run before it (158020/158029/157993/158065/158212).
+
+---
+
+## 9. `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction
+
+**Why:** a T1S follower node running `iperf -c <PC> -p 5001` (TCP) through this
+bridge to a PC would complete the handshake, send one small segment, then one
+larger (~1400+ byte) segment — get it ACKed — and then never send anything
+more. `bridge stats` showed a nonzero `failMtu` counter. Root cause: at the
+point `F_MAC_Bridge_ProcessRxPkt()` computes `fwdDcpt.pktLen =
+TCPIP_PKT_PayloadLen(pRxPkt)`, the value for **eth0/LAN865x-sourced
+(`inPort == 0`) frames already excludes the 14-byte Ethernet header** (the
+generic MCC stack code strips that upstream before this function ever sees the
+packet) **but still includes the 4-byte FCS**, which eth1/GMAC-sourced frames
+never carry this far. The unpatched code treats `pktLen` as already
+correct for both ports, so every eth0-forwarded frame is 4 bytes "too long"
+by the time it's compared against `linkMtu` (rejecting frames right at the
+MTU boundary — the `failMtu` symptom) and by the time it's retransmitted on
+eth1 (the stale 4 bytes get requested as extra TX bytes on top of the real
+frame, most consequential for a large frame close to a buffer/threshold
+boundary — the stall symptom).
+
+**A first attempt at this fix (2026-08-31, same day, reverted before commit)
+was wrong** — ported the assumption from the sister project's own fix
+verbatim without checking whether it held for *this* codebase's net stack
+version (`v3.14.5` here vs. the sister's `v3.11.1`), and subtracted 18
+(header + FCS) instead of 4 (FCS only), undersizing every eth0-forwarded
+frame by 14 bytes. Confirmed harmful, not just ineffective: TCP SYNs
+arrived with everything past the first 8 header bytes (ports + sequence
+number) zeroed, breaking the handshake outright — worse than the original
+bug, which at least let small packets and the handshake through. **Root
+cause established properly this time** via a temporary
+`SYS_CONSOLE_PRINT` of `pktLen`/`segLen` at the computation site, correlated
+against a Wireshark capture of the same ping's true wire frame
+(`ip.len`): the bridge printed `pktLen=132` for a ping whose actual IP total
+length was `128` — a 4-byte difference, matching the FCS exactly, not 18.
+
+**What:** two places, both needed:
+
+```c
+    fwdDcpt.pktLen = TCPIP_PKT_PayloadLen(pRxPkt);
+    if(inPort == 0)
+    {
+        fwdDcpt.pktLen -= 4u;   // eth0/LAN865x: header already stripped upstream, FCS is not
+    }
+```
+
+and, in the shared TX-length fixup applied after either the copy-branch or
+the zero-copy branch (`pFwdPkt == pRxPkt` in the zero-copy case, so its
+`segLen` is still the raw, uncorrected value):
+
+```c
+    pFwdPkt->pDSeg->segLen = fwdDcpt.pktLen + (uint16_t)sizeof(TCPIP_MAC_ETHERNET_HEADER);
+```
+
+replacing the original `pFwdPkt->pDSeg->segLen +=
+sizeof(TCPIP_MAC_ETHERNET_HEADER);`, which blindly added the header size
+back onto whatever `segLen` already held — correct for eth1/GMAC frames,
+4 bytes too many for eth0/LAN865x ones. Setting it directly from the
+already-corrected `fwdDcpt.pktLen` fixes both the copy and zero-copy paths
+uniformly, without needing to know what `F_MAC_Bridge_PacketCopy()` itself
+does to the destination's `segLen`.
+
+Deliberately did **not** touch the MTU comparison itself
+(`pFDcpt->pktLen <= linkMtu`, in `F_MAC_Bridge_SetPacketForward()`) or the
+zero-copy-vs-copy branch structure (`pktRes == TCPIP_MAC_BRIDGE_PKT_RES_HOST_PROCESS`)
+that the reverted first attempt also changed — with `pktLen` now correct at
+the source, the existing comparison and existing branch structure need no
+further adjustment.
+
+**If lost:** T1S→100BASE-T TCP transfers through the bridge stall after the
+first large segment again, and `bridge stats` will show a growing `failMtu`
+counter under any traffic with segments near the interface MTU.
+**Root-caused and fixed 2026-08-31** (see `docs/session-log.md`) — verified
+with a full 5-second `iperf -c <PC> -p 5001` TCP run from a T1S follower:
+1660/1660 segments, 0% loss, 2.31 MB transferred, matching on both client and
+server; `bridge stats` afterward showed `failMtu: 0` despite thousands of
+forwarded frames.
 
 ---
 

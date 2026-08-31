@@ -924,7 +924,23 @@ TCPIP_MAC_BRIDGE_PKT_RES TCPIP_MAC_Bridge_ProcessPacket(TCPIP_MAC_PACKET* pRxPkt
     // forward
     fwdDcpt.tReceive = F_MAC_Bridge_GetSecond();
     fwdDcpt.pktLen = TCPIP_PKT_PayloadLen(pRxPkt);
-    
+    /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3).
+     * Live-verified 2026-08-31 (temp SYS_CONSOLE_PRINT of pktLen vs. segLen,
+     * correlated against a Wireshark capture of the true wire frame for the same
+     * ping): at this point pktLen already EXCLUDES the 14-byte Ethernet header for
+     * inPort==0 (eth0/LAN865x) frames - the generic MCC stack code already strips
+     * it upstream - but STILL INCLUDES the 4-byte FCS, which eth1/GMAC-sourced
+     * frames never carry this far. Measured: bridge printed pktLen=132 for a ping
+     * whose true IP total length (Wireshark ip.len) was 128 - a 4-byte difference,
+     * matching the FCS exactly. An EARLIER attempt at this fix (reverted same day)
+     * wrongly assumed the header was still included too and subtracted 18 instead
+     * of 4 - that undersized every copy from eth0 by 14 bytes, corrupting every
+     * forwarded frame (confirmed: TCP SYNs arrived with everything past the first
+     * 8 header bytes zeroed). Only the FCS needs removing here. */
+    if(inPort == 0)
+    {
+        fwdDcpt.pktLen -= 4u;
+    }
 
     // check destination is in the FDB
     F_MAC_Bridge_CheckFDB(gBridgeDcpt);
@@ -987,10 +1003,19 @@ TCPIP_MAC_BRIDGE_PKT_RES TCPIP_MAC_Bridge_ProcessPacket(TCPIP_MAC_PACKET* pRxPkt
                 pFwdDcpt->ownAckParam = pRxPkt->ackParam;
                 F_MAC_Bridge_StorePktFwdDcpt(pFwdPkt, pFwdDcpt);
 
-                pFwdPkt->ackFunc = &F_MAC_Bridge_PacketAck; 
-                pFwdPkt->ackParam = heDest; 
+                pFwdPkt->ackFunc = &F_MAC_Bridge_PacketAck;
+                pFwdPkt->ackParam = heDest;
                 // adjust: the source packet comes from the MAC driver with segLen adjusted
-                pFwdPkt->pDSeg->segLen += (uint16_t)sizeof(TCPIP_MAC_ETHERNET_HEADER);
+                /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md
+                 * section 3): set from fwdDcpt.pktLen (now the verified-correct
+                 * payload length, see the pktLen fix above) instead of "+=" on
+                 * pFwdPkt's own segLen. In the zero-copy path pFwdPkt IS pRxPkt, so
+                 * its segLen is still the raw, uncorrected eth0/LAN865x value (still
+                 * carries the 4-byte FCS for inPort==0) - blindly adding the header
+                 * size back on top of that stale value left every eth0-forwarded
+                 * frame 4 bytes too long for TX. Setting it directly from the
+                 * already-corrected fwdDcpt.pktLen fixes both paths uniformly. */
+                pFwdPkt->pDSeg->segLen = fwdDcpt.pktLen + (uint16_t)sizeof(TCPIP_MAC_ETHERNET_HEADER);
 
                 F_MAC_Bridge_ForwardPacket(pFwdPkt, heDest);
             }

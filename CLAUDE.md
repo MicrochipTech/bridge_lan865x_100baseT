@@ -203,6 +203,19 @@ cli.bat --port COM8 --read 3 "reset"
   keine Verhaltensunterschiede gefunden, nur MISRA-Stil. Die verwaisten `.ctu-info`-Reste von
   `drv_extphy_lan8742a.*` sind inzwischen sauber (aktueller Stand generiert konsistent nur noch
   LAN8742A-Dateien, keine LAN8740-Reste mehr, siehe Session-Log).
+- **`TCPIP_STACK_DRAM_SIZE` auf `98304` (96K) angehoben — 2026-08-31, Hand-Edit,
+  `configuration.h` (vorher `65535`).** Motivation: dokumentierter Nebenbefund von zuvor (siehe
+  Telnet-Puffer-Eintrag oben) — der freie TCP/IP-Heap sinkt nach einer einzigen
+  Telnet-Verbindung von ~17 KB auf ~3,8 KB und bleibt fragmentiert. Linker-`heap-size`
+  bewusst **nicht** mit angehoben (bleibt `163840`) — Rechnung vorher geprüft: verbleibender
+  Spielraum für alles andere (C-Runtime-Heap, GMAC/LAN865x-Puffer, wolfSSL) sinkt von
+  `163840-65535=98305` auf `163840-98304=65536` (64K), immer noch weit über der
+  dokumentierten Ausfallschwelle von ~`5710` aus dem GMAC-Init-Fehlschlag oben. Build
+  erfolgreich (`BUILD SUCCESSFUL`, `release\bridge_lan865x_100baseT.hex` aktualisiert) —
+  **noch nicht auf Hardware getestet.** **Muss zusätzlich im MCC-GUI gesetzt werden**
+  (`TCPIP CORE` → „Heap Configuration" → „TCP/IP Stack Dynamic RAM Size" → `98304`), sonst
+  fällt der Wert beim nächsten Generate Code kommentarlos auf den zuletzt im Modell
+  gespeicherten Wert zurück — exakt dasselbe Muster wie beim Telnet-Puffer oben.
 - **Wiederkehrender MCC-Generator-Bug: `#include <stdarg.h>` fehlt in generierten Dateien, die
   `va_start`/`va_end` nutzen** → Compile-Fehler `implicit declaration of function 'va_start'`.
   Bisher beobachtet in zwei verschiedenen generierten Dateien:

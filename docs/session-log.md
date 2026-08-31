@@ -2159,4 +2159,105 @@ completed step — do not wait until the end of the session.
 
 ---
 
+### Raised TCPIP_STACK_DRAM_SIZE to 96K
+
+- User asked to raise the TCP/IP stack heap to 96K, motivated by the
+  earlier-documented finding that free TCP/IP heap drops from ~17KB (fresh
+  boot) to ~3.8KB after a single Telnet connection and stays fragmented.
+- Hand-edited `configuration.h`: `TCPIP_STACK_DRAM_SIZE` 65535 -> 98304
+  (documented exception, same pattern as the earlier Telnet TX buffer
+  change - must also be set via MCC's TCPIP CORE component before the next
+  Generate Code, or it silently reverts).
+- Checked headroom against the linker heap-size (`163840`, left unchanged):
+  remaining room for everything else (C-runtime heap, GMAC/LAN865x buffers,
+  wolfSSL) drops from 98305 to 65536 bytes - still far above the ~5710-byte
+  margin that caused the documented GMAC init failure during initial
+  bring-up (2026-08-30), so left the linker heap-size as-is rather than
+  raising it proportionally.
+- Rebuilt via `build.bat`: `BUILD SUCCESSFUL`, `release\bridge_lan865x_100baseT.hex`
+  updated. Not yet flashed/tested on hardware - link success only proves
+  the heap fits statically, not that runtime behavior (heap exhaustion
+  under real Telnet/iperf load) actually improved.
+
+---
+
+### T1S-follower-to-PC TCP stall through the bridge - root-caused and fixed
+
+- User reported (via a Wireshark screenshot of a T1S follower's `iperf` TCP
+  client to the PC through this bridge): handshake completes, one small
+  segment and one ~1400-byte segment go through and get ACKed, then the
+  follower never sends anything more - a permanent stall, not a timeout.
+  User recalled the same symptom from the sister project and believed it
+  was already fixed here.
+- Investigated via an Explore agent comparing this project's LAN865x driver
+  against the bridge's own (already-fixed) `_Lock`/`_Unlock` reference, the
+  sister project's `t1s_100baset_bridge` (bridge and follower), and the
+  sister's own `docs/FALLSTRICKE.md`. Found: (1) `apps/follower_lan865x`'s
+  copy of `drv_lan865x_api.c` never got the `_Lock`/`_Unlock` interrupt-race
+  fix (item 2 in `docs/mcc-generated-code-patches.md`) - structurally the
+  same unprotected `TC6_Service()`/`_EventHandlerSPI()` race, just exposed
+  on the TX-credit (`g->txc`) side instead of RX; (2) the sister's own
+  `FALLSTRICKE.md` documents an independently-found, matching-topology bug
+  in `tcpip_mac_bridge.c` - eth0/LAN865x RX frames arrive with segLen
+  carrying extra header/FCS bytes the MTU check and TX re-forwarding don't
+  account for, causing exactly this "stalls near/at MTU size" symptom.
+- Ported the LAN865x `_Lock`/`_Unlock` fix into `follower_lan865x` verbatim
+  (same pattern as the bridge's own item 2) - built, flashed to Follower B
+  (COM23).
+- **First attempt at the `tcpip_mac_bridge.c` fix was wrong.** Ported the
+  sister's exact diff (subtract 18 for inPort==0, widen the MTU check by
+  the same 18, and replace the zero-copy direct-forward branch with a
+  copy-based one) without verifying the assumption held for this codebase's
+  net stack version (`v3.14.5` vs. the sister's `v3.11.1`). Built clean
+  (`-Werror -Wall`), flashed, but broke TCP outright: SYN packets from
+  *both* Follower A (COM10, the previously-working board, untouched today)
+  and Follower B arrived with everything past the first 8 header bytes
+  (ports + sequence number) zeroed - confirmed via a live Wireshark capture
+  on the PC's own NIC (`ip.len` claimed 128, actual bytes present 114 - a
+  14-byte-too-few undersizing, exactly matching the wrong `-18` subtraction
+  instead of the correct `-4`). Isolated methodically before concluding
+  this: reverted the follower driver fix first (stashed, rebuilt, reflashed,
+  retested - identical corruption, ruling out the driver fix), then
+  reverted the bridge patch itself (stashed, rebuilt, reflashed, retested
+  with Follower A - handshake immediately worked again, and the *original*
+  stall symptom reproduced cleanly, confirming both that the bridge patch
+  was the regression and that the original bug was real and unfixed by it).
+- **Root-caused properly** with a temporary `SYS_CONSOLE_PRINT` of
+  `TCPIP_PKT_PayloadLen(pRxPkt)` vs. `pRxPkt->pDSeg->segLen` at the point
+  `fwdDcpt.pktLen` is computed, triggered by a Follower-A-initiated ping and
+  correlated against a simultaneous Wireshark capture of the same ping's
+  true wire frame on the PC's NIC: bridge printed `pktLen=132` for a ping
+  whose real `ip.len` was `128` - a 4-byte difference (the FCS), not 18.
+  Confirms the 14-byte Ethernet header is already stripped upstream (by the
+  generic MCC stack code) by the time `tcpip_mac_bridge.c` sees the packet,
+  and only the 4-byte FCS remains uncorrected.
+- **Correct fix, minimal:** subtract 4 (not 18) from `fwdDcpt.pktLen` for
+  `inPort == 0`; set the shared post-forward `pFwdPkt->pDSeg->segLen`
+  directly from the now-correct `fwdDcpt.pktLen + sizeof(TCPIP_MAC_ETHERNET_HEADER)`
+  instead of blindly adding the header size onto whatever `segLen` already
+  held (which left it 4 bytes too long specifically for the zero-copy
+  direct-forward path, where `pFwdPkt` is `pRxPkt` itself). Deliberately
+  left the MTU comparison and the zero-copy/copy branch structure
+  untouched - with `pktLen` correct at the source, neither needed changing.
+  Full account with the wrong-vs-right diffs: `docs/mcc-generated-code-patches.md`
+  item 9.
+- **Verified:** removed the temp diagnostic print, rebuilt, reflashed.
+  Ping both directions clean. Full 5-second `iperf -c 192.168.0.100 -p 5001`
+  TCP run from Follower A through the bridge: 1660/1660 segments, 0% loss,
+  2.31 MB transferred (~3.88 Mbit/s), matching on both the follower's own
+  report and the PC-side `iperf` server's. `bridge stats` afterward:
+  `failMtu: 0` despite thousands of forwarded frames (`fwd ucast`/`fwd direct`
+  in the low thousands on both ports).
+- **Not yet retested:** Follower B's own outbound TCP/ICMP corruption bug
+  (found during this same investigation, before the user redirected focus
+  to the bridge - see the `apps/follower_lan865x` side of this session for
+  the isolation evidence). That bug is confirmed unrelated to either fix
+  above (reproduced identically with the driver fix both present and
+  reverted) and remains open, intrinsic to the freshly-ported follower
+  firmware's own outgoing packet construction - not investigated further
+  this session per explicit user direction ("wir konzentrieren uns auf die
+  Bridge").
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->
