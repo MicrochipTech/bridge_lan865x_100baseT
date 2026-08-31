@@ -433,9 +433,18 @@ flash.bat             :: program the board via pyOCD and release it from reset
 flash.bat --list      :: list connected probes
 ```
 
-Unlike the sister project, this repository does **not** commit a prebuilt
-HEX under a `release\` directory — `build.bat` must be run at least once
-before `flash.bat` has anything to flash.
+Like the sister project, `build.bat` copies the resulting HEX into a
+tracked **`release\bridge_lan865x_100baseT.hex`** after every successful build,
+so a fresh clone can flash without building first:
+
+```bat
+flash.bat release\bridge_lan865x_100baseT.hex   :: flash the committed HEX directly
+```
+
+`flash.bat` on its own still defaults to the `dist\` build output, not
+`release\` — pass the path explicitly to flash the committed HEX. Only
+`build.bat` refreshes `release\`; a build done from inside the MPLAB X IDE
+leaves it stale.
 
 ### 5.4 Everyday CLI / GUI access
 

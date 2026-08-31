@@ -64,14 +64,15 @@ PYOCD_PYTHON = _console_python()
 CONFIG_FILE = Path(__file__).parent.parent / "json" / "bridge_config.json"
 
 # Flash/Erase over the EDBG probe (SWD), independent of the open serial link - see
-# flash_current_hex()/erase_chip(). RELEASE_HEX is build.bat's own HEX_PATH (see
-# CLAUDE.md section 2) - unlike the sister project, build.bat here does not copy to
-# a separate release/ folder, so this points straight at the MPLAB X dist output.
+# flash_current_hex()/erase_chip(). RELEASE_HEX points at the tracked release\ HEX
+# build.bat refreshes after every successful build (CLAUDE.md section 2) - like the
+# sister project's GUI, so a fresh clone can flash without building first. Not the
+# dist\ build output directly: that one only exists after a local build, and picking
+# it as the default would silently flash a stale/never-built path on a fresh clone.
 # FLASH_SAME54_SCRIPT already knows how to find the SAME54_DFP pack and pick a
 # probe, this GUI only adds the picker for "which probe, if more than one is
 # connected" and the confirmation dialogs.
-RELEASE_HEX = (Path(__file__).parent.parent / "firmware" / "tcpip_iperf_lan865x.X"
-                / "dist" / "default" / "production" / "tcpip_iperf_lan865x.X.production.hex")
+RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100baseT.hex"
 FLASH_SAME54_SCRIPT = Path(__file__).parent / "flash_same54.py"
 # Typed into the erase confirmation dialog, not just clicked - a chip erase is not
 # reversible (wipes firmware AND the emulated EEPROM, both live in the same flash).
@@ -370,10 +371,10 @@ class BridgeGUI:
         self.connected = False
         self.port_link: Optional[Link] = None  # Globale Verbindung für CLI + Terminal
 
-        # Der zuletzt per "Select Hex..." gewaehlte Pfad -- "Flash" nimmt diesen statt
-        # immer wieder RELEASE_HEX (dist/default/production/...hex), bis erneut ein
-        # anderer gewaehlt wird. Nur Sitzungszustand (wie bridge_config.json's "values"),
-        # nicht persistiert.
+        # The path last picked via "Select Hex..." -- "Flash" uses this instead of
+        # always RELEASE_HEX (release\bridge_lan865x_100baseT.hex) once one has been
+        # chosen. Session state only (like bridge_config.json's "values"), not
+        # persisted.
         self._selected_hex_path: Path = RELEASE_HEX
 
         # Kommando-Antworten laufen über eine EIGENE Queue. Sonst konkurrieren
@@ -1679,7 +1680,7 @@ Example commands:
 
     def flash_current_hex(self):
         """Flash self._selected_hex_path via pyOCD - onto a probe YOU pick. Defaults to
-        RELEASE_HEX (dist/default/production/...hex) until "Select Hex..." picks a
+        RELEASE_HEX (release\\bridge_lan865x_100baseT.hex) until "Select Hex..." picks a
         different file; that choice then sticks for every later "Flash" click, this
         session, until "Select Hex..." is used again.
 
@@ -1697,12 +1698,12 @@ Example commands:
         self._open_probe_picker("flash", hex_path=self._selected_hex_path)
 
     def flash_select_hex(self):
-        """Flash a hex file YOU pick, not necessarily RELEASE_HEX -- e.g. a build from
-        another branch, or one someone else sent you. Starts browsing wherever the
-        current selection sits (dist/default/production/ by default, same as the
-        sister project's "Select Hex..."). The choice also becomes the new default
-        for "Flash", so picking once covers every later flash until this is used
-        again."""
+        """Flash a hex file YOU pick, not necessarily RELEASE_HEX -- e.g. a fresh local
+        build (dist/default/production/...hex), one from another branch, or one
+        someone else sent you. Starts browsing wherever the current selection sits
+        (release\\ by default, same as the sister project's "Select Hex..."). The
+        choice also becomes the new default for "Flash", so picking once covers
+        every later flash until this is used again."""
         initial_dir = (self._selected_hex_path.parent
                         if self._selected_hex_path.parent.is_dir() else Path(__file__).parent)
         chosen = filedialog.askopenfilename(
