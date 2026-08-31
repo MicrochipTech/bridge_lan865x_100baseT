@@ -2275,4 +2275,81 @@ completed step — do not wait until the end of the session.
 
 ---
 
+## 2026-09-01
+
+### iperf throughput matrix, full 12-direction run
+
+- Ran `scripts\iperf_matrix_test.py` (global `python`, project's own `.venv`
+  was never created on this machine yet - pyserial was already available
+  globally, no need to set one up just for this) against this bench's own
+  addresses (script defaults already matched: PC `192.168.0.100`, Bridge
+  `eth0`/`eth1` `192.168.0.11`/`.12` on COM8, FollowerA `192.168.0.201` on
+  COM10, FollowerB `192.168.0.202` on COM23 - confirmed via `ipconfig`
+  before the run).
+- Full 12-pair matrix (UDP ascending search + one TCP measurement per
+  direction) completed cleanly except for one real finding. Results written
+  up as `docs\iperf_matrix_results.md` (matrix table) plus the raw
+  `docs\iperf_matrix_results.log`.
+- Headline numbers: PC↔Bridge (100BASE-T only) up to ~80 Mbit/s UDP / ~11-21
+  Mbit/s TCP; every direction crossing the T1S segment capped ~9.4 Mbit/s
+  UDP as expected for 10BASE-T1S. PC→Follower UDP capped about 1.4 Mbit/s
+  lower than every other T1S-crossing direction (8 vs. 9.4 Mbit/s, the extra
+  100BASE-T hop before the bridge is the likely difference) - not
+  investigated further.
+
+### Bug found and fixed: `TC6_TX_ETH_MAX_SEGMENTS` too low for the bridge's own TCP sends
+
+- The matrix run's real finding: `Bridge -> FollowerA`/`Bridge -> FollowerB`
+  TCP both reported 0.00 Mbit/s (destination captured a stale, hours-old,
+  zero-byte session - the data never arrived), while the same direction's
+  UDP passed cleanly at ~9.4 Mbit/s and the *reverse* direction
+  (`FollowerA -> Bridge` TCP, bridge only ever ACKing) worked fine.
+- User separately reported the same event live from the console: repeating
+  `TCPIP Stack Assert: in file: tcpip_manager.c, func: TCPIPStackPacketTx,
+  line: 5349` during that same test run.
+- Root-caused without guessing, via the project's own existing tooling
+  rather than new instrumentation: `TCPIPStackPacketTx()`'s assert fires on
+  any negative return from the MAC driver's `PacketTx` - a symptom, not the
+  bug. Live `stats` on the bridge (COM8) showed eth0 `qFull=0` (ruling out a
+  genuinely full/busy TX queue) but `err=15` - pointing at the *other*
+  negative-return branch in `DRV_LAN865X_PacketTx()`
+  (`drv_lan865x_api.c`): "Not enough TC6 Segments, increase
+  TC6_TX_ETH_MAX_SEGMENTS". `tc6-conf.h` had that macro at `1u` (single-
+  buffer frames only), while `tcp.c`'s `F_Tcpv4LinkDataSeg()` links "at most
+  2 data segments" (payload plus TX-ring wraparound) on top of the header
+  segment - worst case 3. A bare ACK (no payload) stays 1 segment, and
+  forwarded/bridged frames are always a single pre-built buffer - only the
+  bridge's own TCP stack sending real payload data out `eth0` (an `iperf`
+  TCP *client* toward a follower) ever hits 2-3 segments.
+- Checked the sister project before treating this as project-specific: same
+  bug, same fix, already made there (`t1s_100baset_bridge`,
+  `docs/PORTING_SOFTWARE.md` §3, `1u -> 3u`) - and this repo's own
+  `apps\follower_lan865x` was already at `3u` (correctly ported from the
+  sister's `follower/`, "has had this at 3u since its first commit"). Only
+  this bridge app's own copy of `tc6-conf.h` had been missed during the
+  port.
+- **Fix:** `TC6_TX_ETH_MAX_SEGMENTS` `1u -> 3u` in `tc6-conf.h`, matching
+  both other projects exactly, plus a `HAND-PATCH` comment (no MCC field
+  drives this macro - plain generated boilerplate with a hardcoded value).
+  New `patches\tc6-conf.patch` (baseline `fd375c4`, the commit that moved
+  this app to `apps/bridge_lan865x_100baseT` and last left this file
+  pristine), registered in `patches\README.md`'s baseline table and picked
+  up automatically by `apply_patches.py` (glob-based, no separate wiring
+  needed) - `--check` confirms `tc6-conf: OK, already applied`. Full
+  write-up: `docs/mcc-generated-code-patches.md` item 10.
+- **Rebuilt and reflashed the bridge** (`build.bat` + `flash.bat --probe
+  ATML3264031800001049`, on explicit request) and re-verified:
+  `netinfo` showed both interfaces up cleanly after reset, then
+  `scripts\iperf_matrix_test.py --pairs "Bridge->FollowerA,Bridge->FollowerB"`
+  showed **both directions now succeed at 5.85 Mbit/s TCP** (was 0.00
+  Mbit/s), matching every other T1S-crossing TCP direction from the earlier
+  full matrix. `stats` afterward showed eth0 `TX: err=0` (was climbing
+  before the fix); the `RX: err=95/nobufs=95` seen in the same query is
+  unrelated - expected LAN865x RX buffer pressure from the UDP search
+  deliberately overshooting the ~9.4 Mbit/s T1S ceiling with its 10/20/50/80
+  Mbit/s steps, not a regression from this fix. Results matrix and log
+  updated (`docs/iperf_matrix_results.md`/`.log`).
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->
