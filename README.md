@@ -434,17 +434,15 @@ flash.bat --list      :: list connected probes
 ```
 
 Like the sister project, `build.bat` copies the resulting HEX into a
-tracked **`release\bridge_lan865x_100baseT.hex`** after every successful build,
-so a fresh clone can flash without building first:
+tracked **`release\bridge_lan865x_100baseT.hex`** after every successful
+build, so a fresh clone can flash without building first — `flash.bat`
+defaults to exactly that file. Only `build.bat` refreshes `release\`; a
+build done from inside the MPLAB X IDE leaves it stale. To flash a fresh
+local build instead, pass the `dist\` path explicitly:
 
 ```bat
-flash.bat release\bridge_lan865x_100baseT.hex   :: flash the committed HEX directly
+flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex
 ```
-
-`flash.bat` on its own still defaults to the `dist\` build output, not
-`release\` — pass the path explicitly to flash the committed HEX. Only
-`build.bat` refreshes `release\`; a build done from inside the MPLAB X IDE
-leaves it stale.
 
 ### 5.4 Everyday CLI / GUI access
 

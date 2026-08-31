@@ -3,7 +3,7 @@ rem ===========================================================================
 rem  flash.bat - flashes tcpip_iperf_lan865x onto the SAM E54 board via pyOCD
 rem              (EDBG probe, no MPLAB X needed at flash time)
 rem
-rem  Usage:   flash.bat                  ... flash the default build output
+rem  Usage:   flash.bat                  ... flash the committed release\ HEX
 rem           flash.bat --dry-run        ... only show what would run
 rem           flash.bat <file.hex> ...   ... flash a different image
 rem           flash.bat --list           ... list connected probes
@@ -12,6 +12,12 @@ rem
 rem  Ported from the sister project t1s_100baset_bridge's flash.bat/
 rem  flash_same54.py. Uses this project's own .venv (see setup.bat) -
 rem  falls back to the bare "python" from PATH if it's missing.
+rem
+rem  Defaults to release\bridge_lan865x_100baseT.hex, the HEX build.bat
+rem  commits after every successful build (see CLAUDE.md section 2) - so a
+rem  fresh clone can flash without building first. To flash a fresh local
+rem  build instead (e.g. after editing something), pass the dist\ path
+rem  explicitly: flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex
 rem
 rem  All further arguments are passed through to scripts\flash_same54.py.
 rem ===========================================================================
@@ -23,7 +29,7 @@ set "PY=%~dp0.venv\Scripts\python.exe"
 if not exist "%PY%" set "PY=python"
 
 set "TOOL=%~dp0scripts\flash_same54.py"
-set "HEX=%~dp0firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex"
+set "HEX=%~dp0release\bridge_lan865x_100baseT.hex"
 
 if not exist "%TOOL%" (
     echo ERROR: %TOOL% missing.
@@ -51,7 +57,8 @@ if not errorlevel 1 (
 
 if not exist "%HEX%" (
     echo ERROR: %HEX% does not exist.
-    echo         Run build.bat first ^(or open+build the project once in MPLAB X^).
+    echo         release\ should be tracked in git - check it wasn't deleted, or
+    echo         run build.bat once to recreate it.
     exit /b 1
 )
 

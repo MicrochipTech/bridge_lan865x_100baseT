@@ -127,8 +127,9 @@ cli.bat --port COM8 --read 3 "reset"
   `release\bridge_lan865x_100baseT.hex`** (seit 2026-08-31, wie im Schwesterprojekt, dort eingecheckt
   — damit ein frischer Klon flashen kann, ohne vorher zu bauen). **Nur `build.bat` aktualisiert
   diese Kopie** — ein Build direkt aus der MPLAB-X-IDE lässt `release\` veraltet stehen.
-  `flash.bat` flasht standardmäßig weiterhin aus `dist\`, nicht aus `release\` — Pfad explizit
-  angeben (`flash.bat release\bridge_lan865x_100baseT.hex`), um die eingecheckte Version zu flashen.
+  **`flash.bat` flasht standardmäßig genau diese `release\`-Datei** (seit 2026-08-31, vorher
+  `dist\`) — um stattdessen einen frischen lokalen Build zu flashen, den `dist\`-Pfad explizit
+  angeben: `flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`.
 - **Aus Git Bash `.bat`-Dateien mit absolutem Pfad aufrufen** (sonst „not recognized"):
   `MSYS_NO_PATHCONV=1 cmd /c "C:\work\t1s_bridge\bridge\harmony\net_10base_t1s\apps\tcpip_iperf_lan865x\flash.bat --list" < /dev/null`.
 - **CLI-Antworten sind asynchron** — nach einem Kommando auf die Antwortzeile warten
