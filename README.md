@@ -176,15 +176,43 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
 
 Built on a Microchip SAM E54 host with the T1S side on the **MIKROE-5543
 Two-Wire ETH Click (LAN8651)** — same board population as the sister
-project's `eth0`. `eth1` uses the SAM E54's internal **GMAC** driving an
-external **LAN8742A** 100BASE-T PHY over RMII, unlike the sister project's
-LAN8740A. This repository does not otherwise document the specific base
-board / PHY daughter-card part numbers used for `eth1` — see
+project's `eth0`. `eth1` is driven by the SAM E54's internal **GMAC** over
+RMII; the MCC PHY driver component selected for it is **LAN8742A**, but the
+physical daughter-card actually fitted on this bench is the same
+**AC320004-3** board the sister project uses (LAN8740A) — confirmed by
+flashing the sister's own firmware onto this board's `eth1` and seeing it
+come up immediately, no hardware change. See
 [`docs/how-to-bridge.md`](docs/how-to-bridge.md) for the MCC-level GMAC/PHY
 configuration steps actually performed, and
 [`docs/bridge-configuration-manual.md`](docs/bridge-configuration-manual.md)
 (a work-in-progress skeleton) for where a full hardware write-up is intended
 to land.
+
+![The assembled bridge board: the SAM E54 Curiosity Ultra host (red board) with the green Two-Wire ETH Click (10BASE-T1S MAC-PHY, plugged into the "X32" header, top left) for eth0, and the LAN8740A PHY Daughter Board (AC320004-3, bottom left, with the RJ45 jack) for eth1 — a separate plug-in module, not part of the Curiosity board itself.](docs/images/eval-board-sam-e54-curiosity-t1s-click.jpg)
+
+### Bridge board: bill of materials
+
+| Part | What it is | Microchip order number |
+|---|---|---|
+| **MCU host** (Cortex-M4F, runs this firmware) | SAM E54 Curiosity (Ultra) board | **DM320210** |
+| **100BASE-T PHY** for `eth1` (plugs into the board's PHY daughter-card header) | LAN8740A PHY Daughter Board | **AC320004-3** |
+| **10BASE-T1S MAC-PHY** for `eth0` (SPI ↔ two-wire bus) | MikroElektronika Two-Wire ETH Click (LAN8651) | **MIKROE-5543** |
+
+> **Other PHY/switch daughter boards fit the same connector but need a
+> different MCC-selected driver, not just a config edit** — the
+> `AC320004-x` series covers several interchangeable-connector options:
+>
+> | Order number | Chip | Type | Notable features |
+> |---|---|---|---|
+> | **AC320004-3** | LAN8740A | single-port 10/100 PHY | HP Auto-MDIX, flexPWR low-power modes — the one fitted here |
+> | AC320004-4 | LAN9303 | 3-port managed switch (2 external ports + 1 RMII/MII host port) | integrated switch fabric, VLAN/QoS |
+> | AC320004-5 | KSZ8041 | single-port 10/100 PHY | RMII or MII selectable |
+> | AC320004-6 | KSZ8061 | single-port 10/100 PHY | small QFN package, low power — Microchip's more commonly bundled option for this header, easy to grab by mistake |
+> | AC320004-7 | KSZ8863 | 3-port managed switch (2 integrated PHYs + 1 RMII/MII host port) | VLAN support, integrated switch fabric |
+>
+> Swapping to any of these requires selecting the matching Harmony PHY
+> driver component in MCC and regenerating — see the `DRV_ETHPHY_LAN8740`/
+> `drv_extphy_lan8740.c` note in the sister project for what that entails.
 
 ### How `eth0` (LAN865x) is wired
 
@@ -453,6 +481,10 @@ run_gui.bat                                   :: status/config GUI over the COM 
 run_gui_telnet.bat                            :: same GUI, over Telnet (TCP/23) instead
 run_term.bat                                   :: this board + two T1S follower boards, one window
 ```
+
+![Bridge Status & Configuration GUI (`run_gui.bat`/`run_gui_telnet.bat`): the Bridge Parameters tab, showing per-interface IP/mask/gateway/DNS/MAC, PLCA node id/count, and the Quick Commands panel (Environment read/write, Mirror/Sniffer toggles, stats, flashing).](docs/images/gui-bridge-parameters-tab-overview.png)
+
+![`run_term.bat`: three serial consoles in one window — this bridge (COM8) plus two T1S follower boards (COM10 = node A/201, COM23 = node B/202) — here running `plca_node`/`plca_stat` on each to compare configured vs. observed PLCA node count.](docs/images/gui-telnet-three-terminals-plca-status.png)
 
 ### 5.5 After editing in MCC: reapplying hand-patches
 
