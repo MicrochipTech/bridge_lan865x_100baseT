@@ -91,9 +91,13 @@ cli.bat --port COM8 --read 3 "reset"
   war aber fragil, falls das Schwesterprojekt verschoben/aufgeräumt wird. Die gesamte
   `setup.bat`/`install.bat`-Mechanik (venv, pyOCD/Probe-Auswahl über `bench.json`,
   SAME54_DFP-Debug-Fix, `genmk.bat` für headless-Makefiles) wurde 1:1 vom Schwesterprojekt
-  portiert — **eine Ausnahme:** dessen `setup_compiler.py`/`setup_compiler.config`-Schritt
-  fehlt hier bewusst, weil sein einziger Konsument (`build_summary.py`) in diesem Projekt
-  nicht existiert.
+  portiert, inklusive `setup_compiler.py`/`setup_compiler.config` (seit 2026-08-31 nachgezogen,
+  da auf diesem Rechner zwei XC32-Versionen installiert sind — `v4.60`, `v5.10`). **Wichtig:**
+  dieser Schritt ist auch hier nur eine Notiz, kein Build-Steuerelement — `build.bat` liest
+  `setup_compiler.config` nicht, genau wie im Schwesterprojekt (dort füttert der Wert nur
+  `build_summary.py`s `xc32-nm`, das es hier nicht gibt). Welcher XC32 tatsächlich baut, steht
+  in `nbproject\Makefile-local-default.mk` (von MPLAB X selbst geschrieben) — steuerbar nur über
+  die IDE, nicht über dieses Skript.
 - **`genmk.bat` (headless `nbproject\Makefile-*.mk`-Generierung) funktioniert hier,
   entgegen der älteren Notiz im projektübergreifenden MCC-Wissen** (dort stand: mehrfach
   probiert, nie funktioniert, nur „einmal in der GUI öffnen und bauen" ging — bezog sich

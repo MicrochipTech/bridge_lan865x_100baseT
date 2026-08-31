@@ -7,3 +7,7 @@ json/term_ports.json
 # Own Python virtual environment (see setup.bat / batch\setup_venv.bat) -
 # machine-specific, recreated by setup.bat on a fresh clone.
 .venv/
+
+# Advisory record of the intended XC32 version (see scripts\setup_compiler.py) -
+# machine-specific, not read by build.bat itself.
+setup_compiler.config
