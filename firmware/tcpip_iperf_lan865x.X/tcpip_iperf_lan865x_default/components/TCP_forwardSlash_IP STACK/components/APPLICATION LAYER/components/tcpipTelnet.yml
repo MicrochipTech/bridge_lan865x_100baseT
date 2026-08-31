@@ -1,0 +1,30 @@
+configVersion: 1.0.0
+componentName: tcpipTelnet
+coreVersion: 5.8.4
+device: ATSAME54P20A
+library: []
+dependency:
+- dependencyPackage: class com.microchip.mcc.harmony.HarmonyModule
+  name: tcpipTelnet
+  type: module
+  version: ''
+- dependencyPackage: ''
+  name: net
+  type: package
+  version: v3.14.5
+customDataClassName: com.microchip.utils_mh3.utils.persistence.CustomModuleData
+data:
+  attachments: {}
+  elementPosition: {}
+  symbols:
+    TCPIP_TELNET_SKT_TX_BUFF_SIZE:
+      attributes:
+        id: TCPIP_TELNET_SKT_TX_BUFF_SIZE
+      children:
+      - children:
+        - attributes:
+            value: '3200'
+          type: User
+        type: Values
+      type: Integer
+  userData: {}

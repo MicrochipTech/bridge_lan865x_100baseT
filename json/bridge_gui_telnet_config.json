@@ -1,0 +1,22 @@
+{
+  "ip": "192.168.0.12",
+  "telnet_user": "admin",
+  "telnet_password": "password",
+  "bridge": {
+    "ip0": "192.168.0.11",
+    "mask0": "255.255.255.0",
+    "gw0": "192.168.0.1",
+    "dns0": "192.168.0.1",
+    "ip1": "192.168.0.12",
+    "mask1": "255.255.255.0",
+    "gw1": "192.168.0.1",
+    "dns1": "192.168.0.1",
+    "mac0": "00:04:25:00:00:00",
+    "mac1": "00:04:25:00:00:01",
+    "plca_id": 5,
+    "plca_cnt": 8,
+    "mirror": 0
+  },
+  "values": {},
+  "note": "Session state only, separate from bridge_config.json (used by the UART bridge_gui.py). The register map lives in lan8651_model.json and is never written from here."
+}

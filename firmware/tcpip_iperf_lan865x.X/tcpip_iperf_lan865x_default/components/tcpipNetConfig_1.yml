@@ -1,0 +1,163 @@
+configVersion: 1.0.0
+componentName: tcpipNetConfig_1
+coreVersion: 5.8.4
+device: ATSAME54P20A
+library: []
+dependency:
+- dependencyPackage: class com.microchip.mcc.harmony.HarmonyModule
+  name: tcpipNetConfig_1
+  type: module
+  version: ''
+- dependencyPackage: ''
+  name: net
+  type: package
+  version: v3.14.5
+customDataClassName: com.microchip.utils_mh3.utils.persistence.CustomModuleData
+data:
+  attachments:
+    children:
+    - children:
+      - attributes:
+          id: NETCONFIG_MAC_Dependency
+        children:
+        - children:
+          - attributes:
+              id: targetComponentID
+            children:
+            - type: Value
+              value: drvGmac
+            type: String
+          - attributes:
+              id: targetAttachmentID
+            children:
+            - type: Value
+              value: libdrvGmac
+            type: String
+          type: Attributes
+        type: DirectDependency
+      type: Attachments
+    type: tcpipNetConfig_1
+  elementPosition: {}
+  symbols:
+    TCPIP_NETWORK_DEFAULT_DNS_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_DNS_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: 192.168.100.1
+          type: Dynamic
+        - attributes:
+            value: 192.168.0.1
+          type: User
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_GATEWAY_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_GATEWAY_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: 192.168.100.1
+          type: Dynamic
+        - attributes:
+            value: 192.168.0..1
+          type: User
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_HOST_NAME_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_HOST_NAME_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: MCHPBOARD_C
+          type: Dynamic
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_INTERFACE_NAME_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_INTERFACE_NAME_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: GMAC
+          type: Dynamic
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_IP_ADDRESS_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_IP_ADDRESS_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: 192.168.100.11
+          type: Dynamic
+        - attributes:
+            value: 192.168.0.12
+          type: User
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_MAC_ADDR_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_MAC_ADDR_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: 00:04:25:1C:A0:02
+          type: Dynamic
+        - attributes:
+            value: 00:04:25:1C:A0:03
+          type: User
+        type: Values
+      type: String
+    TCPIP_NETWORK_DEFAULT_MAC_DRIVER_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_DEFAULT_MAC_DRIVER_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: DRV_GMAC_Object
+          type: Dynamic
+        type: Values
+      type: String
+    TCPIP_NETWORK_MACBRIDGE_ADD_IDX1:
+      attributes:
+        id: TCPIP_NETWORK_MACBRIDGE_ADD_IDX1
+      children:
+      - children:
+        - attributes:
+            value: 'true'
+          type: User
+        type: Values
+      type: Boolean
+    TCPIP_STACK_NETWORK_CONFIG_IDX1:
+      attributes:
+        id: TCPIP_STACK_NETWORK_CONFIG_IDX1
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: 'true'
+          type: Dynamic
+        type: Values
+      type: Boolean
+    TCPIP_STACK_NETWORK_CONFIG_NUMBER:
+      attributes:
+        id: TCPIP_STACK_NETWORK_CONFIG_NUMBER
+      children:
+      - children:
+        - attributes:
+            id: tcpipNetConfig_1
+            value: '1'
+          type: Dynamic
+        type: Values
+      type: Integer
+  userData: {}

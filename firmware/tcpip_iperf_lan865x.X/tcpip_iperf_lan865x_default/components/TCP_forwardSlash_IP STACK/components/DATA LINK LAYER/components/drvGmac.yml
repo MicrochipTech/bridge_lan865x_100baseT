@@ -1,0 +1,63 @@
+configVersion: 1.0.0
+componentName: drvGmac
+coreVersion: 5.8.4
+device: ATSAME54P20A
+library: []
+dependency:
+- dependencyPackage: class com.microchip.mcc.harmony.HarmonyModule
+  name: drvGmac
+  type: module
+  version: ''
+- dependencyPackage: ''
+  name: net
+  type: package
+  version: v3.14.5
+customDataClassName: com.microchip.utils_mh3.utils.persistence.CustomModuleData
+data:
+  attachments:
+    children:
+    - children:
+      - attributes:
+          id: GMAC_PHY_Dependency
+        children:
+        - children:
+          - attributes:
+              id: targetComponentID
+            children:
+            - type: Value
+              value: drvExtPhyLan8742a
+            type: String
+          - attributes:
+              id: targetAttachmentID
+            children:
+            - type: Value
+              value: libdrvExtPhyLan8742a
+            type: String
+          type: Attributes
+        type: DirectDependency
+      type: Attachments
+    type: drvGmac
+  elementPosition: {}
+  symbols:
+    DRV_GMAC_PHY_TYPE:
+      attributes:
+        id: DRV_GMAC_PHY_TYPE
+      children:
+      - children:
+        - attributes:
+            id: drvGmac
+            value: LAN8742A
+          type: Dynamic
+        type: Values
+      type: String
+    TCPIP_GMAC_ETH_FILTER_ALL_ACCEPT:
+      attributes:
+        id: TCPIP_GMAC_ETH_FILTER_ALL_ACCEPT
+      children:
+      - children:
+        - attributes:
+            value: 'true'
+          type: User
+        type: Values
+      type: Boolean
+  userData: {}

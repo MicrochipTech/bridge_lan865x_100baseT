@@ -1,0 +1,93 @@
+diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
+index c2304fe..8cc50be 100644
+--- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
++++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c
+@@ -700,6 +700,20 @@ TCPIP_MAC_RES DRV_LAN865X_PacketTx(DRV_HANDLE hMac, TCPIP_MAC_PACKET * ptrPacket
+     pDrvInst = pClient->pDrvInst;
+     SYS_ASSERT(pDrvInst && (LAN865X_MAGIC == pDrvInst->magic), "Driver info pointer is invalid");
+     SYS_ASSERT(ptrPacket, "Packet pointer invalid");
++
++    /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3):
++     * T1S->eth1 port mirror (SPAN) for Wireshark: this is the single eth0 egress
++     * point, so every bridge-originated/forwarded frame passes here. The hook
++     * (app.c/port_mirror.c) is a no-op unless "mirror" is on, and it only clones
++     * frames the bridge itself originates (src MAC == eth0 MAC). Called before the
++     * mutex so it never holds the LAN865x lock while transmitting on eth1/GMAC.
++     * Re-runs of Generate Code remove this block - re-apply after every regenerate
++     * that touches this file. */
++    {
++        extern void mirror_eth0_tx_hook(TCPIP_MAC_PACKET *txPkt);
++        mirror_eth0_tx_hook(ptrPacket);
++    }
++
+     _Lock(&pDrvInst->drvMutex);
+ 
+     tc6SegCount = TC6_GetRawSegments(pDrvInst->drvTc6, &tc6Seg);
+@@ -1497,9 +1511,33 @@ bool TC6_CB_OnSpiTransaction(uint8_t tc6instance, uint8_t *pTx, uint8_t *pRx, ui
+ *  Local Function Implementations
+ ******************************************************************************/
+ 
++/* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3):
++ * OSAL_MUTEX_Lock()/Unlock() on this bare-metal ("basic") OSAL build
++ * (osal_impl_basic.h) are a plain flag check-and-clear - they do NOT disable
++ * interrupts, so they provide no protection against the SPI transfer-complete
++ * ISR (_EventHandlerSPI() -> TC6_SpiBufferDone(), see tc6.c) preempting
++ * task-context TC6_Service() mid-way through RX chunk processing
++ * (process_rx()/TC6_CB_OnRxEthernetSlice(), which accumulate frame state in
++ * shared TC6_t fields with no synchronization of their own). Root-caused
++ * 2026-08-31 (see docs/session-log.md) as the likely cause of an
++ * intermittent, non-deterministic RX segLen corruption (same periodic
++ * message observed both several bytes short and several bytes over,
++ * confirmed via runtime chunk-trace instrumentation) - the same class of
++ * bug (a task-level "lock" that does not actually block the racing ISR) the
++ * sister project (t1s_100baset_bridge) found and fixed for its own GMAC RX
++ * path, documented in its docs/FALLSTRICKE.md.
++ * DRV_LAN865X_INSTANCES_NUMBER == 1 in this project (see configuration.h) -
++ * a single saved-interrupt-state variable is safe as long as _Lock()/
++ * _Unlock() calls are not nested, which matches every call site in this
++ * file. Re-apply this whole function pair after any regenerate that
++ * touches this file. */
++static bool s_lockIntState = false;
++
+ static inline void _Lock(OSAL_MUTEX_HANDLE_TYPE *drvMutex)
+ {
+-    OSAL_RESULT res = OSAL_MUTEX_Lock(drvMutex, OSAL_WAIT_FOREVER);
++    OSAL_RESULT res;
++    s_lockIntState = SYS_INT_Disable();
++    res = OSAL_MUTEX_Lock(drvMutex, OSAL_WAIT_FOREVER);
+     (void)res;
+     SYS_ASSERT(res == OSAL_RESULT_TRUE, "Could not lock the driver mutex");
+ }
+@@ -1509,7 +1559,7 @@ static inline void _Unlock(OSAL_MUTEX_HANDLE_TYPE *drvMutex)
+     OSAL_RESULT res = OSAL_MUTEX_Unlock(drvMutex);
+     (void)res;
+     SYS_ASSERT(res == OSAL_RESULT_TRUE, "Could not unlock the driver mutex");
+-
++    SYS_INT_Restore(s_lockIntState);
+ }
+ 
+ static void PrintRateLimited(const char *statement, ...)
+@@ -2075,6 +2125,23 @@ static bool _InitUserSettings(DRV_LAN865X_DriverInfo * pDrvInst)
+             }
+             break;
+         case 9:
++            /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3),
++             * ported from the sister project: suppress the PHY transmitter (T1SPMACTL.TXD)
++             * BEFORE NETWORK_CONTROL/TXEN is ever written, for a board persisted as a
++             * permanent sniffer - see drvCfg.suppressTx / initialization.c. T1SPMACTL is
++             * untouched by every earlier step here, reset default 0x0000, so a plain write
++             * (not RMW) is safe. Flag off: skip straight to case 10, no extra SPI
++             * transaction. Re-apply this case (and renumber case 10 back down to 9 first)
++             * after every regenerate that touches this file. */
++            if (true == pDrvInst->drvCfg.suppressTx) {
++                if (TC6_WriteRegister(tc, 0x000308F9u /* T1SPMACTL */, 0x00004000u /* TXD */, CONTROL_PROTECTION, _OnInitialRegisterCB, NULL)) {
++                    pDrvInst->initSubState++;
++                }
++            } else {
++                pDrvInst->initSubState++;
++            }
++            break;
++        case 10:
+             /* Enable Data Traffic */
+             if (TC6_WriteRegister(tc, 0x00010000u /* NETWORK_CONTROL */, 0x0000000Cu, CONTROL_PROTECTION, _OnRegisterDoneCB, NULL)) {
+                 done = true;

@@ -1,0 +1,26 @@
+# Python dependencies of this repo's tool scripts.
+#
+#   pip install -r requirements.txt
+#
+# Determined by parsing the imports of every script in the repo root, not from
+# memory. The "used by" count says how many scripts need the package - the
+# previous version named pyserial only, which left pyOCD to a separate path and
+# made "pip install -r requirements.txt" an incomplete instruction.
+
+# Serial console: cli.py, smoketest.py, test_lan8651.py, test_mirror.py (used by: 4)
+pyserial==3.5
+
+# Flashing and register access over the EDBG probe: flash_same54.py,
+# install_prereqs.py                                                   (used by: 2)
+#
+# PINNED, and not as a precaution ritual: 0.44.1 breaks the SWD connection on
+# this setup. The same version is PYOCD_PIN in install_prereqs.py - change it
+# here and you must change it there too. install.bat / setup.bat step 3 still
+# install it that way; this line only makes the plain pip route complete.
+pyocd==0.43.0
+
+# sv-ttk theme (Windows 11 Fluent look): bridge_gui.py, gui_term.py (used by: 2)
+# A hard dependency of both, not optional - they always run themed now, there
+# is no plain-ttk fallback build anymore (the separate "_modern" comparison
+# builds were merged into these two files, see docs/FALLSTRICKE.md 2026-08-28).
+sv-ttk==2.6.1

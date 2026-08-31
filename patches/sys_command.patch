@@ -1,0 +1,31 @@
+diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/system/command/src/sys_command.c b/apps/tcpip_iperf_lan865x/firmware/src/config/default/system/command/src/sys_command.c
+index 495e196..7917ae5 100644
+--- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/system/command/src/sys_command.c
++++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/system/command/src/sys_command.c
+@@ -462,6 +462,26 @@ static void RunCmdTask(SYS_CMD_IO_DCPT* pCmdIO)
+         ParseCmdBuffer(pCmdIO);
+         (*pCmdApi->msg)(cmdIoParam, promptStr);
+     }
++    else if(newCh == '\0')
++    {   /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3):
++         * RFC 854 allows CR to be followed by LF *or* NUL as a line terminator, and
++         * TeraTerm (among other real telnet clients) uses CR NUL, not CR LF, for
++         * Enter - confirmed via a live capture (tcp port 23): every Enter keypress
++         * sent "0d 00", never "0d 0a". Without this branch the trailing NUL falls
++         * through to the generic "valid char; insert and echo it back" case below
++         * and gets silently prepended to the START of the *next* command's
++         * cmdBuff. Every subsequent ParseCmdBuffer() call then strncpy()/strtok()s
++         * a C string whose first byte is '\0' - looks empty to every string
++         * function even though real text follows - so argc is always 0 and every
++         * command after the very first one in a session fails with "Please type in
++         * a command", while the first one (typed into a still-clean buffer) works.
++         * Root-caused 2026-08-31 (see docs/session-log.md) after the user reported
++         * Telnet commands not being recognized in TeraTerm. Simply discarding the
++         * NUL here - it carries no information once CR has already ended the line -
++         * fixes it without disturbing plain CR LF clients (LF hits the branch above
++         * and this one never sees a real NUL from them). */
++        return;
++    }
+     else if(newCh == '\b')
+     {
+         if(pCmdIO->cmdPnt > pCmdIO->cmdBuff)

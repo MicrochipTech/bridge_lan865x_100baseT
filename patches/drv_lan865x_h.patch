@@ -1,0 +1,20 @@
+diff --git a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
+index fd8f641..78eb328 100644
+--- a/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
++++ b/apps/tcpip_iperf_lan865x/firmware/src/config/default/driver/lan865x/drv_lan865x.h
+@@ -110,6 +110,15 @@ typedef struct _DRV_LAN865X_Configuration
+ 
+     bool rxCutThrough;
+ 
++    /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3),
++     * ported from the sister project (t1s_100baset_bridge/firmware/src/config/default/
++     * driver/lan865x/drv_lan865x.h): true suppresses T1SPMACTL.TXD as its own init
++     * step, before NETWORK_CONTROL (TXEN) is ever written - so the PHY transmitter
++     * never goes live, not even briefly. Set from the persisted env (see
++     * initialization.c, right after ENV_Init()). Re-apply this field after every
++     * regenerate that touches this file. */
++    bool suppressTx;
++
+ } DRV_LAN865X_Configuration;
+ 
+ // *****************************************************************************

@@ -1,0 +1,183 @@
+{
+  "model_version": 1,
+  "note": "Model of the persistent environment stored in the Emulated EEPROM, one entry per environment id and version. The GUI reads the id and version from 'showenv' and only interprets the values when it finds a matching entry here - firmware variants share the EEPROM offset but not the layout, so an id it does not know must not be guessed at. Correct mistakes HERE, not in bridge_gui.py, then run check_env_model.py.",
+  "identity": {
+    "pattern": "env\\s+id\\s+(\\S+)\\s+version\\s+(\\d+)\\s+crc\\s+(\\S+)\\s*\\|\\s*firmware\\s+id\\s+(\\S+)\\s+version\\s+(\\d+)\\s+(\\S+)",
+    "groups": [
+      "eeprom_id",
+      "eeprom_version",
+      "eeprom_crc",
+      "firmware_id",
+      "firmware_version",
+      "firmware_variant"
+    ],
+    "command": "showenv",
+    "description": "The identity line printed by showenv. 'eeprom_*' is what was found at boot, 'firmware_*' what this firmware writes - they differ exactly when a record was rejected."
+  },
+  "environments": {
+    "TIBR v5": {
+      "id": "TIBR",
+      "version": 5,
+      "variant": "tcpip_iperf_lan865x_bridge",
+      "accepts_ids": [
+        "LANE"
+      ],
+      "description": "10BASE-T1S <-> 100BASE-T layer 2 bridge on the SAM E54, built on the Microchip net_10base_t1s Harmony content repo (fork: net_10base_t1s_bridge). Sister firmware to EBRG v5 (t1s_100baset_bridge) - same field layout, different board population (LAN865x on both, LAN8742A instead of LAN8740A on the 100BASE-T side).",
+      "source": {
+        "file": "firmware/src/env.c",
+        "struct": "env_t",
+        "size_bytes": 72
+      },
+      "commands": {
+        "read": "showenv",
+        "write_field": "setenv {cli_key} {value}",
+        "persist": "saveenv",
+        "reload": "readenv",
+        "defaults": "resetenv"
+      },
+      "fields": {
+        "ip0": {
+          "label": "ip eth0",
+          "cli_key": "ip0",
+          "type": "ipv4",
+          "pattern": "eth0\\s+ip\\s+(\\S+)",
+          "description": "Static IPv4 address of the interface. Both interfaces sit in the same segment because the device is a layer 2 bridge. Interface: eth0, the 10BASE-T1S side (LAN865x).",
+          "applies": "saveenv"
+        },
+        "mask0": {
+          "label": "mask eth0",
+          "cli_key": "mask0",
+          "type": "ipv4",
+          "pattern": "eth0\\s+ip\\s+\\S+\\s+mask\\s+(\\S+)",
+          "description": "Subnet mask of the interface. Interface: eth0, the 10BASE-T1S side (LAN865x).",
+          "applies": "saveenv"
+        },
+        "gw0": {
+          "label": "gw eth0",
+          "cli_key": "gw0",
+          "type": "ipv4",
+          "pattern": "eth0\\s+ip\\s+\\S+\\s+mask\\s+\\S+\\s+gw\\s+(\\S+)",
+          "description": "Default gateway. 0.0.0.0 means none. Interface: eth0, the 10BASE-T1S side (LAN865x).",
+          "applies": "saveenv"
+        },
+        "dns0": {
+          "label": "dns eth0",
+          "cli_key": "dns0",
+          "type": "ipv4",
+          "pattern": "eth0\\s+ip\\s+\\S+\\s+mask\\s+\\S+\\s+gw\\s+\\S+\\s+dns\\s+(\\S+)",
+          "description": "DNS server. 0.0.0.0 means none. Interface: eth0, the 10BASE-T1S side (LAN865x).",
+          "applies": "saveenv"
+        },
+        "ip1": {
+          "label": "ip eth1",
+          "cli_key": "ip1",
+          "type": "ipv4",
+          "pattern": "eth1\\s+ip\\s+(\\S+)",
+          "description": "Static IPv4 address of the interface. Both interfaces sit in the same segment because the device is a layer 2 bridge. Interface: eth1, the 100BASE-T side (GMAC/LAN8742A).",
+          "applies": "saveenv"
+        },
+        "mask1": {
+          "label": "mask eth1",
+          "cli_key": "mask1",
+          "type": "ipv4",
+          "pattern": "eth1\\s+ip\\s+\\S+\\s+mask\\s+(\\S+)",
+          "description": "Subnet mask of the interface. Interface: eth1, the 100BASE-T side (GMAC/LAN8742A).",
+          "applies": "saveenv"
+        },
+        "gw1": {
+          "label": "gw eth1",
+          "cli_key": "gw1",
+          "type": "ipv4",
+          "pattern": "eth1\\s+ip\\s+\\S+\\s+mask\\s+\\S+\\s+gw\\s+(\\S+)",
+          "description": "Default gateway. 0.0.0.0 means none. Interface: eth1, the 100BASE-T side (GMAC/LAN8742A).",
+          "applies": "saveenv"
+        },
+        "dns1": {
+          "label": "dns eth1",
+          "cli_key": "dns1",
+          "type": "ipv4",
+          "pattern": "eth1\\s+ip\\s+\\S+\\s+mask\\s+\\S+\\s+gw\\s+\\S+\\s+dns\\s+(\\S+)",
+          "description": "DNS server. 0.0.0.0 means none. Interface: eth1, the 100BASE-T side (GMAC/LAN8742A).",
+          "applies": "saveenv"
+        },
+        "mac0": {
+          "label": "mac eth0",
+          "cli_key": "mac0",
+          "type": "mac",
+          "pattern": "eth0\\s+mac\\s+([0-9A-Fa-f:]{17})",
+          "description": "MAC address. Derived from the SAM E54 serial number on first boot (eth1 = eth0 with the low byte incremented).",
+          "applies": "AFTER RESET"
+        },
+        "mac1": {
+          "label": "mac eth1",
+          "cli_key": "mac1",
+          "type": "mac",
+          "pattern": "eth1\\s+mac\\s+([0-9A-Fa-f:]{17})",
+          "description": "MAC address. Derived from the SAM E54 serial number on first boot (eth1 = eth0 with the low byte incremented).",
+          "applies": "AFTER RESET"
+        },
+        "plca_id": {
+          "label": "plca_id (eth0)",
+          "cli_key": "plca_id",
+          "type": "int",
+          "range": [
+            0,
+            254
+          ],
+          "pattern": "plca\\s+id\\s+(\\d+)",
+          "description": "PLCA node id on the T1S segment. 0 makes this node the coordinator, the one that sends beacons. The compiled default is 5, so a lost env record silently costs the coordinator role.",
+          "applies": "saveenv"
+        },
+        "plca_cnt": {
+          "label": "plca_cnt (eth0)",
+          "cli_key": "plca_cnt",
+          "type": "int",
+          "range": [
+            1,
+            255
+          ],
+          "pattern": "plca\\s+id\\s+\\d+\\s+count\\s+(\\d+)",
+          "description": "PLCA node count, written to NODE_CNT in PLCA_CTRL1 (0x0004CA02).",
+          "applies": "saveenv"
+        },
+        "mirror": {
+          "label": "mirror",
+          "cli_key": "mirror",
+          "type": "bool",
+          "values": {
+            "0": "off",
+            "1": "on"
+          },
+          "pattern": "mirror\\s+(ON|OFF)\\s+at boot",
+          "reads_as": {
+            "ON": "1",
+            "OFF": "0"
+          },
+          "description": "Whether the eth0->eth1 port mirror comes up enabled. The 'mirror' command changes the running state only; this is what boots.",
+          "applies": "NEXT BOOT"
+        },
+        "sniffer": {
+          "label": "sniffer",
+          "cli_key": "sniffer",
+          "type": "bool",
+          "values": {
+            "0": "off",
+            "1": "on"
+          },
+          "pattern": "sniffer\\s+(ON|OFF)\\s+at boot",
+          "reads_as": {
+            "ON": "1",
+            "OFF": "0"
+          },
+          "description": "Whether this board comes up as a permanent T1S sniffer: the PHY transmitter (T1SPMACTL.TXD) is suppressed inside the LAN865x driver's own init sequence, before it ever goes live - not just after a later 'sniffer' command. The 'sniffer' command changes the running state only; this is what boots.",
+          "applies": "NEXT BOOT"
+        }
+      }
+    }
+  },
+  "known_other_ids": {
+    "LANE": "Written before ids were per-variant. Ambiguous: both this firmware and t1s_ptp_bridge used it. Accepted by this firmware only when version and crc also match its own layout; rewritten as TIBR on the next saveenv.",
+    "EBRG": "The sister project t1s_100baset_bridge's own id - same size (72 bytes) and version (5) as TIBR, but a distinct magic, so never mistaken for it. Not accepted by this firmware.",
+    "EPTP": "Reserved for t1s_ptp_bridge, whose record is 68 bytes (ptp_auto/ptp_ival instead of mirror/sniffer) - distinguishable by size alone."
+  }
+}
