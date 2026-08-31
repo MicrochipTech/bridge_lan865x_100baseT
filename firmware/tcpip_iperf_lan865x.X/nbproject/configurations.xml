@@ -609,8 +609,8 @@
                              displayName="BASIC CONFIGURATION"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipCmd.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipStack.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipCmd.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/BASIC CONFIGURATION.yml</itemPath>
               </logicalFolder>
@@ -618,13 +618,13 @@
                              displayName="DATA LINK LAYER"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtMacLan865x.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvGmac.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvMiim.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/sercom0.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtPhyLan8742a.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/tcpipNetConfig.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drv_spi.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvGmac.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtPhyLan8742a.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/sercom0.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtMacLan865x.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvMiim.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/DATA LINK LAYER.yml</itemPath>
               </logicalFolder>
@@ -658,26 +658,26 @@
             </logicalFolder>
             <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/TCP_forwardSlash_IP STACK.yml</itemPath>
           </logicalFolder>
-          <itemPath>tcpip_iperf_lan865x_default/components/sercom1.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_time.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/drv_spi_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/drvExtMacLan865x_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/tc0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_1.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/HarmonyCore.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/dfp.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/lib_emulated_eeprom.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/nvmctrl.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_command.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_console.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_debug.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/core.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/lib_wolfcrypt.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_console.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_command.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/tc0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/core.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/HarmonyCore.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sercom1.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/lib_crypto.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/cmsis.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_console_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/dfp.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/evsys.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_time.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_1.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/nvmctrl.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_console_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/drvExtMacLan865x_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_debug.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/cmsis.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/lib_emulated_eeprom.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/drv_spi_0.yml</itemPath>
         </logicalFolder>
         <itemPath>tcpip_iperf_lan865x_default/mcc-config.mc4</itemPath>
       </logicalFolder>

@@ -214,7 +214,7 @@ data:
       children:
       - children:
         - attributes:
-            value: '65535'
+            value: '98304'
           type: User
         type: Values
       type: Integer

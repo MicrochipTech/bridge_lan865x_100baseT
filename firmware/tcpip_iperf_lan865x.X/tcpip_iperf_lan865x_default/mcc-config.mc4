@@ -73,7 +73,7 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\config.h
   hash: 97d048aca9fc536435fb697f0f2a72f52d90d14b9f2ac52dc55b627c4850848e
 - file: ..\src\config\default\configuration.h
-  hash: d9cd4c2cf6834252e0339478cee1a3c24c51a6e9ac4526a93d6a12e818927176
+  hash: 0e9271c07f370e9baf7f0e8e26398b262aa6d62d97a672b6a7747176685036b9
 - file: ..\src\config\default\crypto\crypto.h
   hash: 63bc6589b6538aeb76bc00351d3b99016c8357699c9403067f79a7f43461d208
 - file: ..\src\config\default\crypto\src\crypto.c
