@@ -2248,15 +2248,30 @@ completed step — do not wait until the end of the session.
   report and the PC-side `iperf` server's. `bridge stats` afterward:
   `failMtu: 0` despite thousands of forwarded frames (`fwd ucast`/`fwd direct`
   in the low thousands on both ports).
-- **Not yet retested:** Follower B's own outbound TCP/ICMP corruption bug
-  (found during this same investigation, before the user redirected focus
-  to the bridge - see the `apps/follower_lan865x` side of this session for
-  the isolation evidence). That bug is confirmed unrelated to either fix
-  above (reproduced identically with the driver fix both present and
-  reverted) and remains open, intrinsic to the freshly-ported follower
-  firmware's own outgoing packet construction - not investigated further
-  this session per explicit user direction ("wir konzentrieren uns auf die
-  Bridge").
+- **Correction, same session:** the "Follower B's own outbound TCP/ICMP
+  corruption bug" noted above as still-open was wrong and has been
+  retracted. User pushed back ("ich glaube nicht, dass das der Follower
+  ist") and asked for a decisive test: flash the sister project's own
+  bridge firmware (`t1s_100baset_bridge/release/T1S_100BaseT_Bridge.hex`,
+  built for a LAN8740A PHY - this board has a LAN8742A, but the link still
+  came up and both interfaces reported Ready) onto this board and retest
+  both followers against it. Follower B's ping came back clean
+  (`ip.len=128`/`frame.len=142`, no discrepancy, 3/3 replies) - immediately
+  showing the earlier "follower bug" conclusion was an artifact of testing
+  against this project's own bridge while it still had bugs (either the
+  reverted wrong patch, or the not-yet-fixed original bug, depending on
+  which specific test). Reflashed this project's own corrected bridge
+  firmware and repeated: Follower B ping clean, and a full iperf TCP run
+  (1663/1663 packets, 2.32 MB, 0% loss, client/server reports matching) -
+  identical to Follower A's earlier result. **There is no follower-side
+  bug** - both followers work cleanly against a correctly-fixed bridge, on
+  both bridge firmwares tested. The isolation methodology used earlier
+  (revert-and-retest the same change) was insufficient because it never
+  included a third, independently-known-good reference; only comparing
+  "fixed vs. reverted" of one's own change can't distinguish "this specific
+  change doesn't matter" from "something else about my own bridge is still
+  broken." Full correction and the lesson for next time:
+  `apps/follower_lan865x/CLAUDE.md`.
 
 ---
 
