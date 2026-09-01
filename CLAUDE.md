@@ -1,518 +1,499 @@
-# tcpip_iperf_lan865x (net_10base_t1s_bridge) — Arbeitsanweisungen
+# tcpip_iperf_lan865x (net_10base_t1s_bridge) — Working Instructions
 
-Diese App im Fork `github.com/zabooh/net_10base_t1s_bridge.git` (`origin`, Branch `master`,
-`upstream` = das öffentliche Microchip-Content-Repo `Microchip-MPLAB-Harmony/net_10base_t1s`)
-wird zu einer 10BASE-T1S ↔ 100BASE-T Layer-2-Bridge auf dem ATSAME54P20A ausgebaut — analog zum
-Schwesterprojekt `C:\work\t1s_bridge\bridge\t1s_100baset_bridge` (eigenes Repo, eigene
-`CLAUDE.md` dort), das bereits funktioniert und als Referenz für Bridge-Konfiguration,
-PHY-Zuordnung und Pin-Belegung dient.
+This app in the fork `github.com/zabooh/net_10base_t1s_bridge.git` (`origin`, branch `master`,
+`upstream` = the public Microchip content repo `Microchip-MPLAB-Harmony/net_10base_t1s`)
+is being extended into a 10BASE-T1S ↔ 100BASE-T layer-2 bridge on the ATSAME54P20A — analogous to
+the sister project `C:\work\t1s_bridge\bridge\t1s_100baset_bridge` (own repo, own `CLAUDE.md`
+there), which already works and serves as a reference for bridge configuration, PHY assignment,
+and pin mapping.
 
-**Alle Tools und Doku dieser Bridge-Arbeit leben hier in `apps\tcpip_iperf_lan865x\`**, nicht im
-Repo-Root — der Rest von `net_10base_t1s` ist unverändertes Microchip-Content-Repo mit vielen
-anderen, hier irrelevanten Apps. Neue Markdown-Dateien (Doku, Messprotokolle usw., nicht diese
-`CLAUDE.md`) gehören nach **`docs\`** unter diesem Ordner.
-
----
-
-## 0. Sprachregeln und Dokumentation
-
-- **Alle Markdown-Dateien unter `docs\` sind auf Englisch zu schreiben** — unabhängig davon, in
-  welcher Sprache die Session-Konsole läuft. Diese `CLAUDE.md` selbst bleibt Deutsch (Ausnahme,
-  da projektinterne Arbeitsanweisung, kein an Dritte gerichtetes Dokument).
-- **Jeglicher Code (C oder Python) muss vollständig auf Englisch sein** — Bezeichner, Kommentare,
-  Log-/Konsolenausgaben (`SYS_CONSOLE_PRINT` usw.), Docstrings, Fehlermeldungen. Gilt für neuen
-  Code und für Änderungen an bestehendem Code gleichermaßen.
-- Die Session-Konsole (Chat mit dem User) läuft unabhängig davon in der Sprache, die der User
-  gerade verwendet (aktuell Deutsch) — diese Regel betrifft nur Dateien, nicht die Konversation.
-- **Session-Log:** Fortlaufend über die gesamte Session hinweg mitschreiben, welche Maßnahmen
-  ergriffen und welche Ergebnisse/Erkenntnisse dabei erzielt wurden — Datei
-  `docs\session-log.md`, chronologisch, in Englisch. Nach jedem abgeschlossenen Arbeitsschritt
-  (nicht erst am Ende der Session) ergänzen, damit auch bei einem Session-Abbruch nichts verloren
-  geht. Ziel: im Nachgang nachvollziehen können, mit welchen Maßnahmen was erreicht wurde.
-  **Bei ausgeführten Kommandos (CLI-Tests, Builds, Skript-Aufrufe usw.) immer den exakten
-  Aufruf mit sämtlichen Parametern wörtlich mitschreiben** (nicht nur zusammengefasst
-  beschreiben) — auch fehlgeschlagene Versuche/Sackgassen, damit im Nachgang nachvollziehbar
-  bleibt, was genau funktioniert hat und was nicht.
-- **Konfigurations-Manual:** Parallel zur Session ein Dokument aufbauen, das erklärt, wie die
-  Bridge konfiguriert wird (MCC-Komponenten, Pin-Belegung, Bridge-Aktivierung usw.) — Datei
-  `docs\bridge-configuration-manual.md`, Englisch, für Leser gedacht, die die Bridge selbst
-  nachbauen/konfigurieren wollen (anders als das Session-Log, das den Verlauf dieser Arbeit
-  protokolliert).
-- **Verweist der User auf „Screenshots"** (z. B. „schaue dir den Screenshot an", „kopiere die
-  Screenshots rüber"), ohne einen konkreten Dateinamen/Pfad zu nennen: **immer den/die neuesten
-  Screenshot(s)** in `C:\Users\M91221\OneDrive - Microchip Technology Inc\Pictures\Screenshots`
-  nehmen (nach `LastWriteTime` sortiert). Diese werden nach `docs\images\` kopiert, mit einem
-  **sinnvollen, beschreibenden englischen Dateinamen** (nicht dem `Screenshot YYYY-MM-DD
-  HHMMSS.png`-Originalnamen) — Namensvergabe anhand des tatsächlichen Bildinhalts.
+**All tools and docs for this bridge work live here in `apps\tcpip_iperf_lan865x\`**, not in the
+repo root — the rest of `net_10base_t1s` is an unmodified Microchip content repo with many other
+apps that are irrelevant here. New Markdown files (docs, test logs, etc., not this `CLAUDE.md`)
+belong under **`docs\`** in this folder.
 
 ---
 
-## 1. Harte Regel: MCC-generierter Code wird NIE von Hand angefasst
+## 0. Language rules and documentation
 
-Alles unter `firmware\src\config\default\` (Treiber, `configuration.h`, `system_config.h`,
-`definitions.h`, `initialization.c`, `peripheral\*\plib_*.c/.h` usw.) sowie
-`firmware\tcpip_iperf_lan865x.X\tcpip_iperf_lan865x_default\` (Komponenten-YAMLs,
-`mcc-config.mc4`) wird **ausschließlich über MCC + Generate Code** verändert — **niemals** durch
-manuelle Edits, auch nicht als schneller Fix. Wenn im generierten Code etwas fehlt oder falsch
-ist, gehört die Lösung ins MCC-GUI (Pins, Komponenten-Properties), nicht in die Datei.
-
-**Einzige Ausnahme:** `firmware\src\app.c` / `app.h` (und andere echte User-Dateien außerhalb von
-`config\default\`) — dort liegt z. B. der `TCPIP_STACK_InitCallback`-Stub (siehe Abschnitt 3).
-
-**Vor jeder Diagnose eines Build-/Laufzeitfehlers im generierten Code:** gegen das
-Schwesterprojekt diffen (`t1s_100baset_bridge`, dieselbe Hardware-Familie, nachweislich
-funktionierend), bevor spekuliert wird. Mehrfach Gold wert gewesen — siehe Abschnitt 4.
+- **All Markdown files under `docs\` must be written in English** — regardless of which language
+  the session console is running in. This `CLAUDE.md` file itself is written in English as well
+  (translated from German on 2026-09-01 so it benefits contributors who don't read German — see
+  section 5).
+- **All code (C or Python) must be entirely in English** — identifiers, comments,
+  log/console output (`SYS_CONSOLE_PRINT` etc.), docstrings, error messages. Applies equally to
+  new code and to changes to existing code.
+- The session console (chat with the user) runs independently of this in whatever language the
+  user is currently using (currently German) — this rule concerns only files, not the
+  conversation.
+- **Session log:** Continuously, throughout the whole session, record which actions were taken
+  and what results/insights they produced — file `docs\session-log.md`, chronological, in
+  English. Append after each completed work step (not only at the end of the session), so nothing
+  is lost even if the session is interrupted. Goal: being able to reconstruct afterwards which
+  actions achieved what. **For executed commands (CLI tests, builds, script invocations, etc.)
+  always record the exact invocation with all parameters verbatim** (not just a summarized
+  description) — including failed attempts/dead ends, so it stays traceable afterwards what
+  exactly worked and what didn't.
+- **Configuration manual:** Build up a document in parallel to the session that explains how the
+  bridge is configured (MCC components, pin mapping, bridge activation, etc.) — file
+  `docs\bridge-configuration-manual.md`, English, intended for readers who want to rebuild/
+  configure the bridge themselves (unlike the session log, which records the history of this
+  work).
+- **When the user refers to "screenshots"** (e.g. "look at the screenshot", "copy the
+  screenshots over") without naming a specific filename/path: **always use the newest
+  screenshot(s)** in `C:\Users\M91221\OneDrive - Microchip Technology Inc\Pictures\Screenshots`
+  (sorted by `LastWriteTime`). These get copied to `docs\images\` with a **meaningful,
+  descriptive English filename** (not the original `Screenshot YYYY-MM-DD HHMMSS.png` name) —
+  name it based on the actual image content.
 
 ---
 
-## 2. Bauen, Flashen, Konsole
+## 1. Hard rule: MCC-generated code is NEVER touched by hand
+
+Everything under `firmware\src\config\default\` (drivers, `configuration.h`, `system_config.h`,
+`definitions.h`, `initialization.c`, `peripheral\*\plib_*.c/.h` etc.) as well as
+`firmware\tcpip_iperf_lan865x.X\tcpip_iperf_lan865x_default\` (component YAMLs,
+`mcc-config.mc4`) is changed **exclusively via MCC + Generate Code** — **never** by manual
+edits, not even as a quick fix. If something is missing or wrong in the generated code, the fix
+belongs in the MCC GUI (pins, component properties), not in the file.
+
+**Sole exception:** `firmware\src\app.c` / `app.h` (and other genuine user files outside of
+`config\default\`) — e.g. the `TCPIP_STACK_InitCallback` stub lives there (see section 3).
+
+**Before diagnosing any build/runtime error in generated code:** diff against the sister project
+(`t1s_100baset_bridge`, same hardware family, verified working) before speculating. Has paid off
+multiple times — see section 4.
+
+---
+
+## 2. Building, flashing, console
 
 ```bat
-setup.bat                 :: einmalig pro Rechner, nach dem Klonen (venv, pyOCD, Debug-Fix, Makefiles)
-build.bat                 :: inkrementell (Default), TYPE_IMAGE=PRODUCTION
+setup.bat                 :: once per machine, after cloning (venv, pyOCD, debug fix, makefiles)
+build.bat                 :: incremental (default), TYPE_IMAGE=PRODUCTION
 build.bat rebuild         :: clean + full
 build.bat clean
-flash.bat                 :: pyOCD über EDBG-Probe
-flash.bat --list          :: angeschlossene Probes
-cli.bat "help"             :: Kommando über die serielle Konsole schicken
+flash.bat                 :: pyOCD via EDBG probe
+flash.bat --list          :: connected probes
+cli.bat "help"             :: send a command over the serial console
 cli.bat --port COM8 --read 3 "reset"
 ```
 
-- **Der User baut selbst in MPLAB X** (nicht `build.bat`) — nicht proaktiv `make`/`build.bat`
-  aufrufen, um einen Fix „zu beweisen". Nur auf Zuruf bauen/flashen/testen.
-- **`build.bat`/`flash.bat`/`cli.bat` liegen direkt hier**, `scripts\cli.py` und
-  `scripts\flash_same54.py` darunter — Ports aus dem Schwesterprojekt
+- **The user builds themselves in MPLAB X** (not `build.bat`) — don't proactively call
+  `make`/`build.bat` to "prove" a fix. Only build/flash/test when asked.
+- **`build.bat`/`flash.bat`/`cli.bat` live directly here**, `scripts\cli.py` and
+  `scripts\flash_same54.py` underneath — ported from the sister project
   `t1s_100baset_bridge\build.bat`/`flash.bat`/`scripts\cli.py`/`scripts\flash_same54.py`,
-  Pfade relativ auf `firmware\tcpip_iperf_lan865x.X` angepasst.
-- **Eigene `.venv`** (seit 2026-08-31, `setup.bat`/`batch\setup_venv.bat`,
+  paths adapted relative to `firmware\tcpip_iperf_lan865x.X`.
+- **Own `.venv`** (since 2026-08-31, `setup.bat`/`batch\setup_venv.bat`,
   `scripts\requirements.txt`) — `flash.bat`/`cli.bat`/`run_gui.bat`/`run_gui_telnet.bat`/
-  `run_term.bat` nutzen `%~dp0.venv\Scripts\python(w).exe`, Fallback auf globales `python`.
-  Vorher zeigten diese Skripte fest auf die `.venv` des Schwesterprojekts — funktionierte,
-  war aber fragil, falls das Schwesterprojekt verschoben/aufgeräumt wird. Die gesamte
-  `setup.bat`/`install.bat`-Mechanik (venv, pyOCD/Probe-Auswahl über `bench.json`,
-  SAME54_DFP-Debug-Fix, `genmk.bat` für headless-Makefiles) wurde 1:1 vom Schwesterprojekt
-  portiert, inklusive `setup_compiler.py`/`setup_compiler.config` (seit 2026-08-31 nachgezogen,
-  da auf diesem Rechner zwei XC32-Versionen installiert sind — `v4.60`, `v5.10`). **Wichtig:**
-  dieser Schritt ist auch hier nur eine Notiz, kein Build-Steuerelement — `build.bat` liest
-  `setup_compiler.config` nicht, genau wie im Schwesterprojekt (dort füttert der Wert nur
-  `build_summary.py`s `xc32-nm`, das es hier nicht gibt). Welcher XC32 tatsächlich baut, steht
-  in `nbproject\Makefile-local-default.mk` (von MPLAB X selbst geschrieben) — steuerbar nur über
-  die IDE, nicht über dieses Skript.
-- **`genmk.bat` (headless `nbproject\Makefile-*.mk`-Generierung) funktioniert hier,
-  entgegen der älteren Notiz im projektübergreifenden MCC-Wissen** (dort stand: mehrfach
-  probiert, nie funktioniert, nur „einmal in der GUI öffnen und bauen" ging — bezog sich
-  aufs Schwesterprojekt, nicht auf dieses; beide Erfahrungen bleiben dokumentiert, nur an
-  unterschiedlichen Projekten gemessen). Am 2026-08-31 gegen dieses Projekt getestet, mit
-  einem echten Stolperer unterwegs: die vom Schwesterprojekt geportete Version hatte die
-  MPLAB-X-Version fest als Liste (`v6.25 v6.20 ...`) codiert — auf diesem Rechner sind
-  `v6.25` **und** `v6.35` installiert, die IDE nutzt `v6.35`, die Liste kannte nur bis
-  `v6.25` und wählte damit still die falsche (ältere) Version. Ergebnis: `rc=0`, keine
-  Fehlermeldung, aber `Makefile-local-default.mk` zeigte auf einen anderen DFP-Pack-Pfad
-  und eine andere Java-Version als der IDE-Build — genau die Art „silently wrong", vor der
-  die eigene Kopfzeile des Skripts eigentlich für `xc32-bin2hex` warnt, nur eine Ebene
-  höher. **Fix:** dieselbe dynamische Verzeichnis-Erkennung wie in `build.bat`
-  (`dir /b /ad /o-n "...\MPLABX\v*"`, neueste zuerst) statt der hartcodierten Liste.
-  Danach wählte der Generator `v6.35`, und `Makefile-local-default.mk` kam **byte-identisch**
-  zum IDE-erzeugten Original heraus; `Makefile-default.mk` unterschied sich nur noch in
-  den Flag-Hash-Suffixen (harmloses Rauschen, dieselbe Art wie bei MCC-Generate-Code-Diffs,
-  siehe oben) — keine Pfad-/Compiler-Abweichung mehr. Verifiziert per direktem Diff gegen
-  eine vor dem Test gesicherte Kopie der IDE-erzeugten Dateien, nicht per Build (kein
-  eigenmächtiger `build.bat`-Lauf, siehe Regel oben).
-- **Board-COM-Port: `COM8`** (EDBG-Seriennummer `...001049`) — bestätigt am 2026-08-30.
-  Weitere an diesem Tisch hängende Probes: `COM10` (`...001290`), `COM23` (`...001103`),
-  gehören zu anderen Boards.
-- **HEX-Ausgabe:** `firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`
-  (`TYPE_IMAGE=PRODUCTION`, nicht das `debug`-Verzeichnis).
-- **`build.bat` kopiert das Hex nach jedem erfolgreichen Build zusätzlich nach
-  `release\bridge_lan865x_100baseT.hex`** (seit 2026-08-31, wie im Schwesterprojekt, dort eingecheckt
-  — damit ein frischer Klon flashen kann, ohne vorher zu bauen). **Nur `build.bat` aktualisiert
-  diese Kopie** — ein Build direkt aus der MPLAB-X-IDE lässt `release\` veraltet stehen.
-  **`flash.bat` flasht standardmäßig genau diese `release\`-Datei** (seit 2026-08-31, vorher
-  `dist\`) — um stattdessen einen frischen lokalen Build zu flashen, den `dist\`-Pfad explizit
-  angeben: `flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`.
-- **`scripts\build_summary.py` (seit 2026-09-01, 1:1 vom Schwesterprojekt portiert)**
-  läuft automatisch am Ende jedes `build.bat`-Laufs: Flash-/RAM-Belegung aus
-  `memoryfile.xml`, Heap-/Stack-Größe aus dem `.map` (Heap gefunden, `_min_stack_size`
-  in diesem Projekt **nicht** im `.map` vorhanden — Skript zeigt dafür sauber
-  „-- not found in map --", kein Bug), aktive Interrupt-Handler über `xc32-nm`
-  (bleibt leer, solange `setup_compiler.config` nicht existiert — einmalig
-  `python scripts\setup_compiler.py` laufen lassen, exakt dieselbe Abhängigkeit wie
-  im Schwesterprojekt). Archiviert zusätzlich HEX + Summary-Text zeitgestempelt unter
-  `firmware\tcpip_iperf_lan865x.X\dist\default\production\image\` (gitignored, wie
-  der ganze `dist\`-Baum).
-- **Aus Git Bash `.bat`-Dateien mit absolutem Pfad aufrufen** (sonst „not recognized"):
+  `run_term.bat` use `%~dp0.venv\Scripts\python(w).exe`, falling back to the global `python`.
+  Previously these scripts pointed hard at the sister project's `.venv` — it worked, but was
+  fragile if the sister project got moved/cleaned up. The entire `setup.bat`/`install.bat`
+  mechanism (venv, pyOCD/probe selection via `bench.json`, SAME54_DFP debug fix, `genmk.bat` for
+  headless makefiles) was ported 1:1 from the sister project, including
+  `setup_compiler.py`/`setup_compiler.config` (added 2026-08-31, since this machine has two
+  XC32 versions installed — `v4.60`, `v5.10`). **Important:** here too this step is only a
+  note, not a build control — `build.bat` does not read `setup_compiler.config`, exactly like
+  in the sister project (there, the value only feeds `build_summary.py`'s `xc32-nm`, which
+  doesn't exist here). Which XC32 actually builds is recorded in
+  `nbproject\Makefile-local-default.mk` (written by MPLAB X itself) — controllable only via the
+  IDE, not via this script.
+- **`genmk.bat` (headless `nbproject\Makefile-*.mk` generation) works here**, contrary to the
+  older note in the cross-project MCC knowledge (which said: tried multiple times, never
+  worked, only "open once in the GUI and build" worked — that referred to the sister project,
+  not this one; both experiences remain documented, just measured on different projects).
+  Tested against this project on 2026-08-31, with a real stumbling block along the way: the
+  version ported from the sister project had the MPLAB X version hard-coded as a list
+  (`v6.25 v6.20 ...`) — this machine has both `v6.25` **and** `v6.35` installed, the IDE uses
+  `v6.35`, but the list only knew up to `v6.25` and thus silently picked the wrong (older)
+  version. Result: `rc=0`, no error message, but `Makefile-local-default.mk` pointed to a
+  different DFP pack path and a different Java version than the IDE build — exactly the kind of
+  "silently wrong" the script's own header comment actually warns about for `xc32-bin2hex`, just
+  one level up. **Fix:** the same dynamic directory detection as in `build.bat`
+  (`dir /b /ad /o-n "...\MPLABX\v*"`, newest first) instead of the hard-coded list. After that
+  the generator picked `v6.35`, and `Makefile-local-default.mk` came out **byte-identical** to
+  the IDE-generated original; `Makefile-default.mk` differed only in the flag hash suffixes
+  (harmless noise, the same kind as with MCC Generate Code diffs, see above) — no more path/
+  compiler deviation. Verified by direct diff against a copy of the IDE-generated files saved
+  before the test, not by building (no unsolicited `build.bat` run, see the rule above).
+- **Board COM port: `COM8`** (EDBG serial number `...001049`) — confirmed on 2026-08-30.
+  Other probes connected at this bench: `COM10` (`...001290`), `COM23` (`...001103`), belong to
+  other boards.
+- **HEX output:** `firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`
+  (`TYPE_IMAGE=PRODUCTION`, not the `debug` directory).
+- **`build.bat` additionally copies the hex to `release\bridge_lan865x_100baseT.hex` after
+  every successful build** (since 2026-08-31, same as in the sister project, checked in there —
+  so a fresh clone can be flashed without building first). **Only `build.bat` updates this
+  copy** — a build directly from the MPLAB X IDE leaves `release\` outdated.
+  **`flash.bat` flashes exactly this `release\` file by default** (since 2026-08-31, previously
+  `dist\`) — to flash a fresh local build instead, pass the `dist\` path explicitly:
+  `flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`.
+- **`scripts\build_summary.py` (since 2026-09-01, ported 1:1 from the sister project)** runs
+  automatically at the end of every `build.bat` run: flash/RAM usage from `memoryfile.xml`,
+  heap/stack size from the `.map` (heap found, `_min_stack_size` **not** present in the `.map`
+  in this project — the script cleanly shows "-- not found in map --" for that, not a bug),
+  active interrupt handlers via `xc32-nm` (stays empty as long as `setup_compiler.config`
+  doesn't exist — run `python scripts\setup_compiler.py` once, exactly the same dependency as
+  in the sister project). Also archives HEX + summary text with a timestamp under
+  `firmware\tcpip_iperf_lan865x.X\dist\default\production\image\` (gitignored, like the whole
+  `dist\` tree).
+- **Call `.bat` files with an absolute path from Git Bash** (otherwise "not recognized"):
   `MSYS_NO_PATHCONV=1 cmd /c "C:\work\t1s_bridge\bridge\harmony\net_10base_t1s\apps\tcpip_iperf_lan865x\flash.bat --list" < /dev/null`.
-- **CLI-Antworten sind asynchron** — nach einem Kommando auf die Antwortzeile warten
-  (`cli.bat --read N "..."`), nicht sofort das nächste schicken.
-- **`cli.py --read N` wartet bewusst *mindestens* N Sekunden, bevor es sich beendet** (`drain()`
-  hat eine feste untere Zeitschranke). Ein äußerer Bash-`timeout M`-Wrapper mit `M < N` killt den
-  Prozess deshalb garantiert vorzeitig — unabhängig davon, ob das Board überhaupt geantwortet
-  hätte. **2026-08-30 real passiert:** `timeout 15 ... cli.py --read 20 "reset"` lieferte
-  Exit-Code 124 und wurde fälschlich als „Board hängt" gedeutet, obwohl das Board sauber gebootet
-  war — derselbe Aufruf ohne `timeout`-Wrapper (oder mit `M > N`) zeigte sofort die korrekten
-  Boot-Meldungen. Regel: **`cli.py` grundsätzlich ohne zusätzlichen `timeout`-Wrapper aufrufen**
-  (es terminiert von selbst deterministisch nach `--read`-Sekunden); falls doch ein äußeres
-  Sicherheitsnetz nötig ist, `M` mindestens `N + 15s` setzen. Vor einer „Board hängt"-Diagnose
-  zusätzlich per pyOCD gegenchecken, nicht auf ein einzelnes CLI-Timeout verlassen — Rezept:
+- **CLI responses are asynchronous** — wait for the response line after a command
+  (`cli.bat --read N "..."`), don't send the next one immediately.
+- **`cli.py --read N` deliberately waits *at least* N seconds before exiting** (`drain()` has a
+  fixed lower time bound). An outer Bash `timeout M` wrapper with `M < N` therefore guaranteed
+  kills the process prematurely — regardless of whether the board had actually responded.
+  **Actually happened on 2026-08-30:** `timeout 15 ... cli.py --read 20 "reset"` returned exit
+  code 124 and was wrongly interpreted as "board is hanging", even though the board had booted
+  cleanly — the same call without the `timeout` wrapper (or with `M > N`) immediately showed the
+  correct boot messages. Rule: **always call `cli.py` without an additional `timeout` wrapper**
+  (it terminates deterministically on its own after `--read` seconds); if an outer safety net is
+  still needed, set `M` to at least `N + 15s`. Before diagnosing a "board is hanging" case,
+  additionally cross-check via pyOCD instead of relying on a single CLI timeout — recipe:
   ```
   pyocd commander -t atsame54p20a -u <probe-id> -M pre-reset --elf <production.elf> -c "reg" -c "exit"
   xc32-addr2line.exe -e <production.elf> -f -C <pc-hex> <lr-hex>
   ```
-  `-M pre-reset` resettet und hält sofort an; `reg` zeigt PC/LR, `addr2line` löst sie zu
-  Funktion+Zeile auf. Deutlich zuverlässiger als die serielle Konsole, um zu unterscheiden
-  „Board hängt wirklich fest" (PC bleibt bei wiederholtem Aufruf/nach Wartezeit identisch) von
-  „läuft normal, nur die serielle Ausgabe kam nicht an" (PC liegt irgendwo im Hauptprogramm,
-  ändert sich zwischen zwei Aufrufen).
-- `cli.py`s stdout-Encoding kann bei Nicht-ASCII-Bytes vom Board (z. B. Boot-Log direkt nach
-  `reset`) unter Windows crashen (`UnicodeEncodeError`, cp1252-Konsole) — mit
-  `PYTHONIOENCODING=utf-8` davor umgehen.
+  `-M pre-reset` resets and halts immediately; `reg` shows PC/LR, `addr2line` resolves them to
+  function+line. Considerably more reliable than the serial console for distinguishing "board is
+  genuinely stuck" (PC stays identical across repeated calls/after waiting) from "running
+  normally, the serial output just didn't arrive" (PC is somewhere in the main program, changes
+  between two calls).
+- `cli.py`'s stdout encoding can crash on non-ASCII bytes from the board (e.g. boot log right
+  after `reset`) on Windows (`UnicodeEncodeError`, cp1252 console) — work around it with
+  `PYTHONIOENCODING=utf-8` beforehand.
 
 ---
 
-## 3. Bekannte MCC-Regenerate-Fallstricke (dieses Projekt, 2026-08-29/30)
+## 3. Known MCC regenerate pitfalls (this project, 2026-08-29/30)
 
-- **Generate Code kann unvollständig laufen, ohne Fehlermeldung.** Mehrfach beobachtet: neue
-  Treiberordner (`driver\gmac\`, `driver\ethphy\`) und Komponenten-YAMLs werden geschrieben,
-  aber `configuration.h`/`system_config.h`/`initialization.c` bleiben unverändert (Mtime prüfen!).
-  **Nach jedem Generate: `git status`/Mtimes der Kerndateien kontrollieren**, nicht nur den
-  Build-Erfolg — ein sauberer Compile heißt nicht, dass alles neu generiert wurde.
-- **`#define DRV_GMAC` fehlend → `gmac_drv_dcpt[]` wird zum Null-Element-Array** →
-  `-Werror=array-bounds` beim Compile (`drv_gmac.c`, `gmac_drv_dcpt[macIndex]`). Fix: in MCC
-  sicherstellen, dass die GMAC-Komponente wirklich generiert wurde (siehe oben), nicht die
-  Zeile von Hand einfügen.
-- **`TCPIP_STACK_NETWORK_INTERAFCE_COUNT` blieb nach dem GMAC-Hinzufügen auf `1` stehen**,
-  obwohl MCCs eigene „Configuration Summary" (Overview → Config Summary) bereits korrekt
-  „Network Interface: 2" zeigte — die Summary-Ansicht spiegelt nur das Modell, nicht den
-  generierten Code. Erst ein tatsächlicher Generate-Lauf (Hauptfenster-Toolbar, nicht das
-  TCP/IP-Configurator-Popup) schreibt es in `configuration.h`.
-- **GMAC/PHY-Komponenten im Data-Link-Graphen verdrahten setzt NICHT automatisch die
-  Pin-Belegung.** Die zehn RMII+MDIO-Pins mussten separat im MCC-**Pins**-Editor (eigenes
-  Fenster, nicht der TCP/IP-Configurator) der GMAC-Funktion zugewiesen werden:
-  `PA12, PA13, PA14, PA15, PA17, PA18, PA19, PC20, PC22, PC23`. Ohne das initialisiert die
-  MDIO-Leitung nie den physischen PHY. **2026-08-30 nachgeholt** — `peripheral\port\plib_port.c`
-  wurde danach 1:1 gegen die (nachweislich funktionierende) Version im Schwesterprojekt geprüft:
-  alle zehn Pins jetzt identisch. **Trotzdem weiterhin derselbe Fehler beim Boot:**
-  `TCP/IP Stack: GMAC MAC initialization failed` / `Initialization failed 9 - Aborting!` — die
-  Pin-Belegung war also notwendig, aber offenbar nicht hinreichend. Auch Takt-Konfiguration
-  (`peripheral\clock\plib_clock.c`) und alle GMAC/MIIM/PHY-Makros in `configuration.h` wurden
-  gegen das Schwesterprojekt geprüft und sind inhaltlich gleich.
-  **GELÖST (2026-08-30):** tatsächliche Ursache war **keine** der obigen Stellen, sondern ein zu
-  klein bemessener Heap — `TCPIP_STACK_DRAM_SIZE` (MCC: `TCPIP CORE` → „Heap Configuration" →
-  „TCP/IP Stack Dynamic RAM Size") stand hier auf `39250` statt der `65536`/generiert `131072` im
-  Schwesterprojekt, und der Linker-`heap-size` (System → Project Configuration → XC32 Global
-  Options → Linker → General → Heap Size) auf `44960` statt `163840` — beide um denselben Faktor
-  (~3,6×) zu klein. Da `TCPIP_STACK_HEAP_TYPE_INTERNAL` mit `malloc_fnc = malloc` den gesamten
-  TCP/IP-Heap per einem einzigen `malloc(TCPIP_STACK_DRAM_SIZE)` aus dem Linker-Heap holt, blieb
-  praktisch kein Spielraum mehr für `DRV_GMAC_Initialize()`s Deskriptor-/Puffer-Allokation
-  (`F_DRV_GMAC_RxCreate`/`TxCreate`, `drv_gmac.c`) — daher der Fehlschlag trotz korrekter Pins/
-  Takt/PHY-Adresse. Nach Anheben beider Werte (Linker `heap-size` → `163840`,
-  `TCPIP_STACK_DRAM_SIZE` → `65535`, danach Generate Code) kommen beide Interfaces sauber hoch,
-  Ping auf ein anderes T1S-Node (`192.168.0.202`) erfolgreich. Ausführlicher Verlauf inkl.
-  Diff-Nachweisen: `docs\session-log.md`. `drv_miim.c`/`drv_ethphy.c` (Paketversionsunterschied
-  `net v3.14.5` vs. Schwester-`v3.11.1`) wurden vorsorglich per Agent Zeile für Zeile verglichen —
-  keine Verhaltensunterschiede gefunden, nur MISRA-Stil. Die verwaisten `.ctu-info`-Reste von
-  `drv_extphy_lan8742a.*` sind inzwischen sauber (aktueller Stand generiert konsistent nur noch
-  LAN8742A-Dateien, keine LAN8740-Reste mehr, siehe Session-Log).
-- **`TCPIP_STACK_DRAM_SIZE` auf `98304` (96K) angehoben — 2026-08-31, Hand-Edit,
-  `configuration.h` (vorher `65535`).** Motivation: dokumentierter Nebenbefund von zuvor (siehe
-  Telnet-Puffer-Eintrag oben) — der freie TCP/IP-Heap sinkt nach einer einzigen
-  Telnet-Verbindung von ~17 KB auf ~3,8 KB und bleibt fragmentiert. Linker-`heap-size`
-  bewusst **nicht** mit angehoben (bleibt `163840`) — Rechnung vorher geprüft: verbleibender
-  Spielraum für alles andere (C-Runtime-Heap, GMAC/LAN865x-Puffer, wolfSSL) sinkt von
-  `163840-65535=98305` auf `163840-98304=65536` (64K), immer noch weit über der
-  dokumentierten Ausfallschwelle von ~`5710` aus dem GMAC-Init-Fehlschlag oben. Build
-  erfolgreich (`BUILD SUCCESSFUL`, `release\bridge_lan865x_100baseT.hex` aktualisiert) —
-  **noch nicht auf Hardware getestet.** **Muss zusätzlich im MCC-GUI gesetzt werden**
-  (`TCPIP CORE` → „Heap Configuration" → „TCP/IP Stack Dynamic RAM Size" → `98304`), sonst
-  fällt der Wert beim nächsten Generate Code kommentarlos auf den zuletzt im Modell
-  gespeicherten Wert zurück — exakt dasselbe Muster wie beim Telnet-Puffer oben.
-- **Wiederkehrender MCC-Generator-Bug: `#include <stdarg.h>` fehlt in generierten Dateien, die
-  `va_start`/`va_end` nutzen** → Compile-Fehler `implicit declaration of function 'va_start'`.
-  Bisher beobachtet in zwei verschiedenen generierten Dateien:
-  - `drv_lan865x_api.c` (`PrintRateLimited()`) — wurde bei einem Regenerate entfernt.
-  - `library\tcpip\src\telnet.c` (`F_Telnet_PRINT()`) — fehlte direkt nach Hinzufügen der
-    Telnet-Server-Komponente über MCC, **2026-08-30**, gleicher Fehlerbefund.
-  Kein MCC-GUI-Feld dafür vorhanden — Fix bislang durch direktes Ergänzen des Includes in der
-  betroffenen generierten Datei (Ausnahme von der harten Regel oben, da reiner
-  Generator-Bug ohne Konfigurationsäquivalent). **Nach jedem Generate-Lauf, der eine
-  betroffene Datei anfasst, kontrollieren, ob der Include noch da ist** — MCC nimmt ihn beim
-  nächsten Regenerate wieder heraus.
-- **`TCPIP_STACK_InitCallback` wird von `initialization.c` als `extern` deklariert und in
-  `TCPIP_STACK_Init()` verdrahtet, aber MCC generiert keine Definition** → Linkerfehler
-  `undefined reference to 'TCPIP_STACK_InitCallback'`. Lösung **in `app.c`** (User-Code, siehe
-  Regel 1) implementiert: liefert einen persistenten Zeiger auf eine `static
-  TCPIP_STACK_INIT`-Struct mit denselben Werten, die `initialization.c` ohnehin lokal aufbaut,
-  und gibt sofort `0` zurück (kein asynchrones Warten nötig).
-- **Bridge aktivieren geht über eine Checkbox pro Netzwerk-Interface-Komponente**, nicht über
-  eine eigene MCC-Komponente und nicht über manuelles Eintragen von
-  `TCPIP_STACK_USE_MAC_BRIDGE` & Co.: im MCC-Component-Modell trägt jede
-  `tcpipNetConfig_N`-Komponente (NETCONFIG-0/NETCONFIG-1 im Data-Link-Graphen) ein Boolean-Feld
-  `TCPIP_NETWORK_MACBRIDGE_ADD_IDXn` — im Schwesterprojekt bei beiden Interfaces auf `true`
-  gesetzt (`Add to MAC Bridge` in den Properties). Erst NETCONFIG-0 und NETCONFIG-1 dort
-  aktivieren, dann Generate — MCC erzeugt daraus automatisch den
-  `TCPIP_STACK_USE_MAC_BRIDGE`-Block in `configuration.h` sowie `tcpipMacbridgeTable`/
-  `tcpipBridgeInitData` und den `{TCPIP_MODULE_MAC_BRIDGE, ...}`-Eintrag in `initialization.c`.
-  **Seit 2026-08-30 aktiviert und als voll funktionierende End-zu-End-Bridge bestätigt**
-  (Ping-Matrix, `bridge status/stats/fdb`, siehe `docs\session-log.md`).
-- **`nbproject\configurations.xml`s `languageToolchainVersion`** kann vom tatsächlich beim Link
-  verwendeten Compiler abweichen (bei uns `4.60` eingetragen, real gelinkt wurde mit `v5.10`,
-  sichtbar am `xc32-gcc.exe`-Pfad im Build-Log) — im Zweifel den Pfad im Build-Log prüfen, nicht
-  nur dieses Feld.
-- **Silizium-Erratum: `OSCCTRL_DPLLSYNCBUSY.DPLLRATIO` löscht sich nie**, obwohl die DPLL korrekt
-  einrastet — Microchip Silicon Errata **DS80000748K** ("SAM D5x/E5x Family Silicon Errata and
-  Data Sheet Clarification"), Punkt **2.13.2 „FDPLL Ratio in DPLLnRATIO"**, betrifft beide
-  Silizium-Revisionen (A und D), also auch dieses Board. Der MCC-generierte, unveränderte
-  `FDPLL0_Initialize()`-Code in `peripheral\clock\plib_clock.c` wartet dort mit einer
-  unbegrenzten `while(...)`-Schleife → **kompletter Boot-Hang, noch vor jeglichem App-Code**,
-  reproduzierbar abhängig von scheinbar unzusammenhängenden Linker-Adressverschiebungen
-  anderswo im Image (2026-08-30/31 stundenlang bisektiert, siehe `docs\session-log.md`).
-  Per direktem Registerzugriff bestätigt: `DPLLRATIO` (`0x40001034`) übernimmt den Wert korrekt,
-  `DPLLSTATUS` (`0x40001040`) zeigt `LOCK|CLKRDY` — nur `DPLLSYNCBUSY` (`0x4000103C`) bleibt
-  fälschlich hängen. **Fix (dokumentierte Ausnahme, kein MCC-GUI-Feld dafür vorhanden):** in
-  `FDPLL0_Initialize()` alle drei Wait-Schleifen (`DPLLSYNCBUSY.DPLLRATIO`, `.ENABLE`,
-  `DPLLSTATUS.LOCK|CLKRDY`) mit einer Zählschranke (`CLOCK_DPLL0_SYNC_TIMEOUT = 2000`) versehen
-  statt endlos zu pollen — nach jedem Generate-Lauf, der `plib_clock.c` anfasst, erneut
-  anwenden. **Achtung beim Debuggen dieser Datei:** ein naiver `pyocd commander -M attach -c
-  halt`-Snapshot zeigte den PC in `__dinit_clear`/C-Runtime-Startup — sowohl beim hängenden ALS
-  AUCH beim bekannt guten Build (Sampling-Artefakt dieses Attach-Modus, keine echte Fundstelle).
-  Verlässlich sind nur direkte Registerwerte (`DPLLSTATUS`/`DPLLRATIO`/`DPLLSYNCBUSY`) oder
-  `-M pre-reset` mit PC-Vergleich über mehrere Aufrufe.
-- **App-Bug (kein MCC-Thema, aber derselbe Boot-Hang verdeckte ihn):** `MIRROR_Initialize()`
-  (`port_mirror.c`) alloziert sofort 8 Paketpuffer aus dem TCP/IP-Heap
-  (`TCPIP_PKT_PacketAlloc()`). Wird sie — wie zunächst portiert — direkt aus
-  `APP_Initialize()` aufgerufen, crasht das mit einem echten Bus-Fault (Wildpointer,
-  `BFAR` außerhalb von Flash/RAM), weil `APP_Initialize()` noch synchron innerhalb von
-  `SYS_Initialize()` läuft (`initialization.c`, direkt nach `TCPIP_STACK_Init()`), der TCP/IP-
-  Heap zu diesem Zeitpunkt aber noch nicht zwingend fertig eingerichtet ist (`TCPIP_STACK_Init()`
-  stößt die eigentliche, asynchrone Stack-Initialisierung nur an). **Fix:** `MIRROR_Initialize()`
-  in `app.c`s bereits vorhandene `APP_STATE_SERVICE_TASKS`-Phase verschoben (dieselbe Stelle, an
-  der schon Paket-Handler-Registrierung und `env_apply()` auf einen laufenden Stack warten).
-  Die anderen drei portierten Module (`lan865x_diag`/`noip_test`/`testserver`) registrieren in
-  ihrer `_Initialize()` nur CLI-Kommandos (kein Heap-Zugriff) und sind davon nicht betroffen.
-- **Telnet-Login zeigte immer „Access denied" — gefixt 2026-08-31, dieselbe Bug-Klasse wie
-  `MIRROR_Initialize()` oben.** `TCPIP_TELNET_AuthenticationRegister()` wurde ebenfalls aus
-  `APP_Initialize()` heraus aufgerufen — die Registrierung meldete Erfolg, wurde aber von
-  `TCPIP_TELNET_Initialize()` (`telnet.c`, MCC-generiert, Zeile ~317: `telnetAuthHandler =
-  NULL;`) kurz danach stillschweigend überschrieben, weil dieses Modul-Init erst später als
-  Teil von `TCPIP_STACK_Init()`s asynchroner Initialisierung läuft. Jeder echte Login-Versuch
-  traf dadurch auf `telnetAuthHandler == NULL` und wurde ohne jeden Aufruf unseres Handlers
-  abgelehnt. **Fix:** Registrierung nach `APP_STATE_SERVICE_TASKS` verschoben, direkt hinter
-  `MIRROR_Initialize()`. **Verifiziert** per rohem Python-Socket-Test plus paralleler
-  `tshark`-Aufnahme auf `tcp port 23`: `Logged in successfully` statt `Access denied`.
-- **Telnet-Kommandos wurden nie erkannt ("Please type in a command" bei jeder Zeile) —
-  gefixt 2026-08-31.** TeraTerm sendet jedes Zeichen einzeln und Enter als **`0d 00`
-  (CR NUL)**, nicht CR LF (per `tshark`-Mitschnitt auf `tcp port 23` bestätigt, RFC 854
-  erlaubt beides). `sys_command.c`s (MCC-generierter) Zeicheneditor (`RunCmdTask()`)
-  kennt nur `\r`/`\n` als Zeilenende — das nachfolgende NUL-Byte fiel in den
-  generischen "Zeichen einfügen"-Zweig und landete als führendes Byte im NÄCHSTEN
-  Kommandopuffer. `strncpy()`/String-Funktionen sehen einen mit `\0` beginnenden
-  String als leer an, selbst wenn danach echter Text folgt — deshalb funktioniert das
-  jeweils erste Kommando einer Sitzung, jedes weitere schlägt fehl. **Fix
-  (dokumentierte Ausnahme, `sys_command.c`):** neuer `else if (newCh == '\0')`-Zweig
-  direkt nach der `\r`/`\n`-Behandlung, der das Byte einfach verwirft.
-  `patches/sys_command.patch` neu erzeugt (Tool deckt jetzt 5 Dateien ab).
-  **Verifiziert:** zwei aufeinanderfolgende zeichenweise `"help"`-Eingaben über einen
-  rohen Socket sowie live in TeraTerm — beide funktionieren jetzt zuverlässig.
-- **Alle eigenen Kommandos antworteten über Telnet ins Leere — gefixt 2026-08-31.**
-  Direkte Folge des Login-Fixes: Kommandos wurden jetzt geparst, aber ihre Ausgabe
-  landete immer auf der seriellen Konsole, nie im Telnet-Client. Ursache: alle sechs
-  eigenen Modul-Dateien (`env.c`, `app.c`, `port_mirror.c`, `lan865x_diag.c`,
-  `noip_test.c`, `testserver.c`) benutzten `SYS_CONSOLE_PRINT()` (fest auf
-  `SYS_CONSOLE_DEFAULT_INSTANCE`, d.h. immer seriell) statt des `pCmdIO`, den jeder
-  `SYS_CMD_FNC`-Handler bekommt — 231 Fundstellen. **Fix:** neuer Header
-  `firmware/src/cmd_print.h` mit `CMD_PRINT(pCmdIO, ...)`/`CMD_MSG(pCmdIO, str)`
-  (Wrapper um `pCmdIO->pCmdApi->print/msg`), alle Kommando-Antworten in allen sechs
-  Dateien umgestellt; Boot-/Hintergrund-Logs (kein Kommando-Kontext, z. B.
-  `APP_Tasks()`s Paket-Log-Drain, `TESTSERVER_Tasks()`s Connect/Disconnect-Meldungen)
-  bewusst unverändert auf `SYS_CONSOLE_PRINT` gelassen. Für `lan865x_diag.c`s
-  asynchrone Register-Operationen (Ergebnis kommt erst später aus
-  `LAN865X_DIAG_Tasks()`, nach Rückkehr des Kommando-Handlers) zusätzlich
-  `CMD_PRINT_OR_CONSOLE(pCmdIO, ...)` plus ein gemerktes `s_diag_pCmdIO` (sicher, weil
-  das Modul ohnehin nur eine Operation gleichzeitig zulässt, `LAN865X_DIAG_Busy()`).
-  **Verifiziert** über echten Telnet-Socket: `showenv`/`stats`/`meminfo`/`mirror`/
-  `lanhelp` UND die beiden asynchronen Fälle `lan_read`/`plca_stat` (inkl. verketteter
-  RMW+Multi-Step-Read-Sequenz) liefern jetzt korrekt über Telnet.
-- **Telnet-Ausgabepuffer zu klein für größere Kommando-Ausgaben (z. B. `dump`/`netinfo`)
-  — 2026-08-31, echtes MCC-Konfigurationsfeld, kein Hand-Patch.**
-  `TCPIP_TELNET_SKT_TX_BUFF_SIZE` stand auf `0` (= Framework-Default), spürbar zu klein
-  (`F_Telnet_MSG()` in `telnet.c` verwirft den Rückgabewert von `NET_PRES_SocketWrite()`
-  — was nicht in den Puffer passt, geht kommentarlos verloren). Testreihe mit
-  `dump <addr> <größe>` (Größe frei wählbar) plus `netinfo` über echten Telnet-Socket:
-  0 schneidet schon bei 200 Byte ab; 2048 deckt 200, nicht 500/800; **3072 deckt 200 und
-  500 vollständig** (nicht 800); 4096 deckt alle drei, drückt den größten freien
-  TCP/IP-Heap-Block nach einem Connect/Dump/Disconnect-Zyklus aber auf nur ~720 Byte —
-  angesichts früherer Heap-Erschöpfungs-Bugs in diesem Projekt zu knapp. **Auf 3072
-  gesetzt** als Mittelweg (aktuell Hand-Edit in `configuration.h` für die Testreihe —
-  muss vor dem nächsten Generate Code auch über MCCs Telnet-Server-Komponente
-  gesetzt werden, sonst fällt es beim Regenerieren still auf 0 zurück). Nebenbefund,
-  unabhängig von der Puffergröße: der freie TCP/IP-Heap sinkt nach einer einzigen
-  Telnet-Verbindung von ~17 KB (frischer Boot) auf ~3,8 KB und bleibt fragmentiert
-  (größter Block nur ~1,6 KB) — noch nicht weiter untersucht.
-- **`dump` bei größeren Byte-Zahlen (z. B. 500) lieferte kaputte/korrumpierte Ausgabe —
-  Eigenverschulden aus dem obigen Fix, behoben 2026-08-31.** Beim Aufspalten von
-  `DumpMem()` in eine `pCmdIO`-fähige `CmdDumpMem()` (für den `dump`-Befehl) ging der
-  Busy-Wait-Schutz des Originals verloren (`SYS_CONSOLE_WriteFreeBufferCountGet()`,
-  seriell-spezifisch — für Telnet gibt es dafür keine Entsprechung über `pCmdIO`).
-  `CmdDumpMem()` druckte Zeilen ungebremst in CPU-Geschwindigkeit, überholte damit
-  sowohl den seriellen 1024-Byte-Ringpuffer (`SERCOM1_USART_Write()` verwirft still,
-  was nicht passt) als auch Telnets `F_Telnet_MSG()` (verwirft `NET_PRES_SocketWrite()`s
-  Rückgabewert ebenso) — Resultat: nicht nur Abschnitt, sondern **korrumpierte,
-  ineinander verschachtelte Bytes** mitten in der Ausgabe.
-  **Erster Fix (verworfen):** feste 10ms-Pacing-Pause nach jeder Zeile — funktionierte,
-  bremste aber JEDEN Dump unnötig, auch viel zu kleine. **Besserer Fix (Nutzer-Idee:
-  „das Backpressure hatte im Schwesterprojekt schon funktioniert"):** die ORIGINALE
-  `SYS_CONSOLE_WriteFreeBufferCountGet()`-Busy-Wait aus `DumpMem()` unbedingt
-  wiederverwendet, ganz ohne Geräteerkennung — der Trick: diese Prüfung hängt nur vom
-  seriellen Ringpuffer ab, der bei einem Telnet-ausgelösten Dump praktisch immer frei
-  ist (nichts anderes schreibt gleichzeitig seriell), meldet dort also fast sofort
-  „genug Platz" und bremst faktisch nicht; bei einem seriell ausgelösten Dump greift
-  exakt dieselbe präzise, lastadaptive Drosselung wie zuvor. `app_wait_ms()` wieder
-  entfernt. **Verifiziert:** identische Ergebnisse wie mit der festen Pause (seriell
-  `dump 800` komplett und sauber; Telnet `dump 500` komplett, `dump 800` sauber an der
-  3072-Byte-Puffergrenze abgeschnitten, `netinfo` komplett) — jetzt ohne künstliche
-  Verzögerung bei kleinen/Telnet-Dumps.
-- **Echtes Telnet-Backpressure in `F_Telnet_MSG()` — gefixt 2026-08-31.** Der obige
-  Fix umgeht das Puffer-Limit nur, deckt es nicht ab: Ausgaben über
-  `TCPIP_TELNET_SKT_TX_BUFF_SIZE` (3072 Byte) hinweg blieben abgeschnitten.
-  Erster Versuch — ein begrenztes Busy-Wait auf `NET_PRES_SocketWriteIsReady()`,
-  auch mit zusätzlichem `NET_PRES_SocketFlush()` — brachte **nichts** (`dump 800`
-  weiterhin nur ~3080 von ~4011 Byte, dafür 6,6s statt praktisch sofort). Ursache:
-  in diesem Bare-Metal-Single-Superloop-Aufbau läuft `SYS_CMD_Tasks()` — das ruft
-  den Kommando-Handler und darüber `F_Telnet_MSG()` — in `SYS_Tasks()`
-  (`config/default/tasks.c`) **vor** `TCPIP_STACK_Task()`/`NET_PRES_Tasks()`.
-  Nichts leert den Telnet-Sende-Puffer, solange diese beiden nicht laufen — anders
-  als beim UART, wo eine Hardware-Interrupt unabhängig vom Hauptloop weiterläuft.
-  Nutzerfrage „wäre es möglich, während des Wartens `SYS_Tasks()` aufzurufen?" —
-  Antwort: nicht die ganze Funktion (würde rekursiv in `SYS_CMD_Tasks()` selbst
-  — den gerade aktiven Stackframe mit eigenem statischem Parser-Zustand — und in
-  `APP_Tasks()` hineinlaufen), aber genau die zwei relevanten Aufrufe sind aus
-  `F_Telnet_MSG()` heraus nie reentrant (diese Funktion wird ausschließlich über
-  die `SYS_CMD_API` `.msg`/`.print`-Callbacks erreicht, also nur aus
-  `SYS_CMD_Tasks()`, einem Geschwister von `TCPIP_STACK_Task()` in `SYS_Tasks()`,
-  nie darin verschachtelt). Neue `APP_PumpNetworkStack()` (`app.c`/`app.h`) kapselt
-  `TCPIP_STACK_Task(sysObj.tcpip)` + `NET_PRES_Tasks(sysObj.netPres)`;
-  `F_Telnet_MSG()`s Busy-Wait ruft sie statt nur zu spinnen. **Verifiziert:**
-  `dump 800/2000/4000/8000` alle vollständig (4011/9938/19813/39554 Byte) in
-  konstant ~1,8–2,2s statt Abbruch bei ~3072 Byte; `netinfo` ebenfalls vollständig.
-  Neuer Hand-Patch `patches/telnet.patch`, Details:
-  `docs/mcc-generated-code-patches.md` Punkt 8.
-- **Nachtrag: `F_Telnet_MSG()` korrumpierte große Dumps weiterhin intermittierend
-  — gefixt 2026-08-31.** Nutzer-Test mit `dump 0x20000000 32000` zeigte:
-  gelegentlich (nicht bei jedem Lauf — ein Timing-Race, keine feste
-  Größengrenze) fehlte das Ende einer Zeile (z. B. nur 9 statt 16 ASCII-Punkte)
-  und die **nächste** Zeilenadresse hing direkt ohne `\n\r` dran —
-  Byte-Gesamtzahl variierte bei jedem Lauf (158020/158029/157993/158065/158212).
-  Auf Nutzerwunsch per `tshark`-Mitschnitt (`follow,tcp,raw`) gegengeprüft: der
-  Draht zeigt denselben Inhalt wie der Python-Client, kein Client-Artefakt —
-  dieser eine Mitschnitt-Lauf lief zufällig sauber durch, was zur
-  Race-Condition-These passt (ein deterministischer Fehler wäre jedes Mal
-  gleich aufgetreten). Ursache: `NET_PRES_SocketWriteIsReady()`s Vorab-Prüfung
-  sagt nicht zuverlässig voraus, was ein einzelner `NET_PRES_SocketWrite()`-
-  Aufruf tatsächlich annimmt — der Rückgabewert wurde trotzdem verworfen,
-  dieselbe „fire and forget"-Bugklasse wie beim seriellen
-  `SERCOM1_USART_Write()`, nur intermittierend statt konsistent. Gefixt durch
-  Schleife über den echten Rückgabewert: Rest erneut schreiben, dazwischen
-  `APP_PumpNetworkStack()`, begrenzt durchs bestehende 500ms-Timeout.
-  Nutzerfrage, ob `CmdDumpMem()`s eigener serieller Busy-Wait
-  (`SYS_CONSOLE_WriteFreeBufferCountGet(...) < pos`) jetzt „auch für UART und
-  Telnet funktionieren sollte" — Antwort: tut er bereits, aus zwei
-  verschiedenen Gründen (serielle Drossel bei UART, harmloses Sofort-Weiter
-  bei Telnet, da die echte Telnet-Korrektheit jetzt komplett in
-  `F_Telnet_MSG()` liegt) — der zugehörige Kommentar in `app.c` war veraltet
-  (behauptete fälschlich, Korrektheit käme von der Puffergröße
-  `TCPIP_TELNET_SKT_TX_BUFF_SIZE`) und wurde korrigiert. **Verifiziert:**
-  `dump 0x20000000 32000` 5× hintereinander, alle 5 Läufe exakt 158065 Byte,
-  keine verklebten Zeilen mehr — vorher bei jedem Lauf unterschiedlich.
-- **LAN865x-RX-Pfad hatte eine echte Race Condition — gefixt 2026-08-31 (siehe
-  `docs/session-log.md` für die volle Herleitung).** Ursprünglicher Befund:
-  `rxPkt->pDSeg->segLen` wich vom im IP-Header deklarierten Gesamtlängenwert ab, und zwar
-  **nicht-deterministisch** — dieselbe periodische Nachricht zeigte zu unterschiedlichen
-  Zeitpunkten `88` und `102` Byte (wahre Länge: 98). Root Cause per derselben Methodik wie im
-  Schwesterprojekt gefunden (`FALLSTRICKE.md`, GMAC-RX-Race, 2026-08-27): `_Lock()`/`_Unlock()`
-  in `drv_lan865x_api.c` wickeln nur `OSAL_MUTEX_Lock/Unlock` ein, was auf diesem Bare-Metal-Build
-  (`osal_impl_basic.h`) **nur ein einfaches Flag ist, keine Interrupts sperrt** — der
-  SPI-Transfer-Complete-Callback `_EventHandlerSPI()` → `TC6_SpiBufferDone()` (läuft aus einem
-  echten Hardware-Interrupt) kann dadurch jederzeit mitten in die Task-Kontext-Verarbeitung von
-  `TC6_Service()`/`process_rx()` hineinfeuern — exakt dieselbe Fehlerklasse (task-lokales „Lock",
-  das die tatsächlich konkurrierende ISR nicht blockiert).
-  **Fix (dokumentierte Ausnahme, `DRV_LAN865X_INSTANCES_NUMBER==1` in diesem Projekt macht eine
-  einzelne gespeicherte Interrupt-State-Variable sicher):** `_Lock()`/`_Unlock()` rahmen jetzt
-  zusätzlich `SYS_INT_Disable()`/`SYS_INT_Restore()` — ein echter kritischer Abschnitt, wie im
-  Schwesterprojekt.
-  **Verifiziert:** nach dem Fix zeigte dieselbe Testnachricht über mehrere Stichproben hinweg
-  konstant `102` (keine Streuung mehr); der volle `sniffer_capture_test.py`-Vollständigkeitstest
-  zeigte für **alle 3982** iperf-UDP-Frames exakt dieselbe `frame.len/ip.len/udp.length`-Kombination
-  (0 Varianz) — die nicht-deterministische Komponente ist nachweislich behoben.
-  **Der damals offen gelassene Rest (fester, größenabhängiger Offset: ~1512-Byte-Frames
-  10 Byte zu wenig, ~98-Byte-Frames 4 Byte zu viel) ist inzwischen root-gecauset und
-  gefixt — 2026-08-31, siehe `docs/session-log.md` für die volle Herleitung.** Zwei
-  unabhängige, sich addierende Effekte, nicht eine einzelne Chunk-Grenzen-Eigenheit:
-  1) `TC6_CB_OnRxEthernetPacket()` meldet `len`/`segLen` durchgehend 4 Byte zu groß
-     (vermutlich die vom T1S-PHY noch mitgelieferte, nie abgeschnittene 4-Byte-FCS,
-     entgegen `tcpip_mac.h`s dokumentiertem RX-Vertrag). An dieser Stelle stimmen
-     `len` und `segLen` aber immer überein — kein Rennen, keine Korruption.
-  2) Der generische, MCC-generierte Stack-Code (`library/tcpip/src/tcpip_manager.c`,
-     Zeile ~2544) zieht davon `sizeof(TCPIP_MAC_ETHERNET_HEADER)` (14) ab, bevor er an
-     registrierte Paket-Handler wie `pktEth0Handler()`/`MIRROR_Eth0Rx()` weiterreicht —
-     dokumentiertes, korrektes Standardverhalten des Frameworks, kein Bug für sich.
-  **Der eigentliche Bug (nicht MCC-generiert, App-Code):** `port_mirror.c`s
-  `MIRROR_Eth0Rx()` benutzte `rxPkt->pDSeg->segLen` an dieser Stelle direkt als volle
-  Kopierlänge ab `pMacLayer` — es bedeutet dort aber "Payload nach dem 14-Byte
-  MAC-Header", nicht "volle Framelänge". Jeder gesniffte/gespiegelte RX-Frame wurde
-  dadurch 14 Byte zu kurz kopiert (bei kleinen Frames unsichtbar, solange
-  `MIRROR_SAFE_FRAME_LEN`s Clamp nicht griff; bei allem über einem TC6-SPI-Chunk sehr
-  sichtbar). **Fix (eine Zeile):** `rxPkt->pDSeg->segLen + sizeof(TCPIP_MAC_ETHERNET_HEADER)`
-  als Framelänge an `mirror_ethpkt_to_eth1()` übergeben — bewusst nur an der RX-Stelle,
-  nicht bei `mirror_eth0_tx_hook()` (TX-Pakete durchlaufen den RX-seitigen
-  Header-Abzug nie, ihr `segLen` bedeutet dort schon "volle Framelänge").
-  **Hatte doch Funktionsschaden, anders als hier ursprünglich vermerkt:** korrupte
-  Sniffer-Captures (jedes große Frame zeigte in Wireshark "Previous segment not
-  captured"/"ACKed unseen segment") — die normale Bridge-Weiterleitung
-  (`tcpip_mac_bridge.c`) läuft nie durch `MIRROR_Eth0Rx()` und war nie betroffen.
-  **Verifiziert** (zweimal: direkt nach dem Fix und nochmal nach vollständigem Entfernen
-  der Diagnose-Instrumentierung + Clean-Rebuild): `sniffer_capture_test.py` zeigt
-  UDP/TCP in beiden Richtungen `COMPLETE`, keine „shorter than IP/UDP header claims"-
-  Warnung mehr; `tshark` bestätigt `frame.len=1514`/`tcp.len=1460` (vorher
-  `1504`/`1450`) und null `tcp.analysis.lost_segment`-Treffer.
-  Die temporäre Diagnose-Instrumentierung (`g_tc6DiagEnable` in `tc6.c`/
-  `drv_lan865x_api.c`, plus das dafür ergänzte `MIRRORDIAG` in `port_mirror.c`) ist
-  wieder vollständig entfernt.
-- **`suppressTx` aus dem Schwesterprojekt portiert (2026-08-31):** `setenv sniffer 1` +
-  `saveenv` sorgte vorher nur für das RAM-Flag „sniffer ON at boot", ohne den T1S-Sender
-  wirklich stummzuschalten — bestätigt per `lan_read 0x000308F9` (`T1SPMACTL`), das direkt
-  nach dem Boot noch `0x0` zeigte statt `0x4000` (TXD). Grund: das Schwesterprojekt hat dafür
-  ein eigenes `suppressTx`-Feld in `DRV_LAN865X_Configuration`, das MCC hier nicht generiert.
-  **Fix (dokumentierte Ausnahme, drei Hand-Patches):** `bool suppressTx;` in `drv_lan865x.h`
-  ergänzt (gleiche Position wie im Schwesterprojekt, nach `rxCutThrough`); in
-  `drv_lan865x_api.c`s `_InitUserSettings()`-Zustandsautomat einen neuen `case 9` eingefügt,
-  der `T1SPMACTL=0x4000` schreibt, wenn `drvCfg.suppressTx` gesetzt ist — **vor** dem
-  abschließenden `NETWORK_CONTROL`/TXEN-Write (der dafür von `case 9` auf `case 10`
-  hochgezählt wurde); in `initialization.c` `.suppressTx = false,` im Default-Initialisierer
-  und `drvLan865xInitData[0].suppressTx = env_sniffer();` direkt neben der bestehenden
-  `nodeId`/`nodeCount`-Übernahme ergänzt. **Verifiziert:** `lan_read 0x000308F9` zeigt jetzt
-  sofort nach dem Boot `0x00004000`, noch bevor irgendein `sniffer`-Kommando lief. Board nach
-  dem Test wieder auf `sniffer OFF` zurückgesetzt (register-bestätigt).
+- **Generate Code can run incompletely, without an error message.** Observed multiple times: new
+  driver folders (`driver\gmac\`, `driver\ethphy\`) and component YAMLs get written, but
+  `configuration.h`/`system_config.h`/`initialization.c` remain unchanged (check mtimes!).
+  **After every Generate: check `git status`/mtimes of the core files**, not just build success
+  — a clean compile does not mean everything was actually regenerated.
+- **Missing `#define DRV_GMAC` → `gmac_drv_dcpt[]` becomes a zero-element array** →
+  `-Werror=array-bounds` at compile time (`drv_gmac.c`, `gmac_drv_dcpt[macIndex]`). Fix: make
+  sure in MCC that the GMAC component was actually generated (see above), don't insert the line
+  by hand.
+- **`TCPIP_STACK_NETWORK_INTERAFCE_COUNT` stayed at `1` after adding GMAC**, even though MCC's
+  own "Configuration Summary" (Overview → Config Summary) already correctly showed "Network
+  Interface: 2" — the summary view only mirrors the model, not the generated code. Only an
+  actual Generate run (main window toolbar, not the TCP/IP Configurator popup) writes it into
+  `configuration.h`.
+- **Wiring GMAC/PHY components in the data-link graph does NOT automatically set the pin
+  mapping.** The ten RMII+MDIO pins had to be assigned separately in the MCC **Pins** editor
+  (its own window, not the TCP/IP Configurator) for the GMAC function:
+  `PA12, PA13, PA14, PA15, PA17, PA18, PA19, PC20, PC22, PC23`. Without that, the MDIO line
+  never initializes the physical PHY. **Caught up on 2026-08-30** — `peripheral\port\plib_port.c`
+  was then checked 1:1 against the (verified working) version in the sister project: all ten
+  pins now identical. **Still the same boot error nonetheless:**
+  `TCP/IP Stack: GMAC MAC initialization failed` / `Initialization failed 9 - Aborting!` — so
+  the pin mapping was necessary but apparently not sufficient. Clock configuration
+  (`peripheral\clock\plib_clock.c`) and all GMAC/MIIM/PHY macros in `configuration.h` were also
+  checked against the sister project and match.
+  **SOLVED (2026-08-30):** the actual cause was **none** of the above, but an undersized heap —
+  `TCPIP_STACK_DRAM_SIZE` (MCC: `TCPIP CORE` → "Heap Configuration" → "TCP/IP Stack Dynamic RAM
+  Size") was set here to `39250` instead of the `65536`/generated `131072` in the sister
+  project, and the linker `heap-size` (System → Project Configuration → XC32 Global Options →
+  Linker → General → Heap Size) to `44960` instead of `163840` — both undersized by the same
+  factor (~3.6×). Since `TCPIP_STACK_HEAP_TYPE_INTERNAL` with `malloc_fnc = malloc` obtains the
+  entire TCP/IP heap from a single `malloc(TCPIP_STACK_DRAM_SIZE)` out of the linker heap, there
+  was practically no room left for `DRV_GMAC_Initialize()`'s descriptor/buffer allocation
+  (`F_DRV_GMAC_RxCreate`/`TxCreate`, `drv_gmac.c`) — hence the failure despite correct pins/
+  clock/PHY address. After raising both values (linker `heap-size` → `163840`,
+  `TCPIP_STACK_DRAM_SIZE` → `65535`, followed by Generate Code) both interfaces come up cleanly,
+  ping to another T1S node (`192.168.0.202`) successful. Full history including diff evidence:
+  `docs\session-log.md`. `drv_miim.c`/`drv_ethphy.c` (package version difference `net v3.14.5`
+  vs. the sister project's `v3.11.1`) were checked line by line via agent as a precaution — no
+  behavioral differences found, only MISRA style. The orphaned `.ctu-info` remnants of
+  `drv_extphy_lan8742a.*` are clean now (current state consistently generates only LAN8742A
+  files, no more LAN8740 remnants, see session log).
+- **`TCPIP_STACK_DRAM_SIZE` raised to `98304` (96K) — 2026-08-31, hand edit,
+  `configuration.h` (previously `65535`).** Motivation: documented side finding from earlier
+  (see the telnet buffer entry above) — the free TCP/IP heap drops from ~17 KB to ~3.8 KB after
+  a single telnet connection and stays fragmented. Linker `heap-size` deliberately **not**
+  raised along with it (stays `163840`) — the math was checked beforehand: remaining headroom
+  for everything else (C runtime heap, GMAC/LAN865x buffers, wolfSSL) drops from
+  `163840-65535=98305` to `163840-98304=65536` (64K), still far above the documented failure
+  threshold of ~`5710` from the GMAC init failure above. Build successful (`BUILD SUCCESSFUL`,
+  `release\bridge_lan865x_100baseT.hex` updated) — **not yet tested on hardware.** **Must also
+  be set in the MCC GUI** (`TCPIP CORE` → "Heap Configuration" → "TCP/IP Stack Dynamic RAM
+  Size" → `98304`), otherwise the value silently falls back to whatever was last stored in the
+  model on the next Generate Code — exactly the same pattern as the telnet buffer above.
+- **Recurring MCC generator bug: `#include <stdarg.h>` missing in generated files that use
+  `va_start`/`va_end`** → compile error `implicit declaration of function 'va_start'`. Observed
+  so far in two different generated files:
+  - `drv_lan865x_api.c` (`PrintRateLimited()`) — got removed during a regenerate.
+  - `library\tcpip\src\telnet.c` (`F_Telnet_PRINT()`) — was missing right after adding the
+    telnet server component via MCC, **2026-08-30**, same error signature.
+  No MCC GUI field exists for this — fix so far is by directly adding the include to the
+  affected generated file (exception to the hard rule above, since it's a pure generator bug
+  with no configuration equivalent). **After every Generate run that touches an affected file,
+  check whether the include is still there** — MCC removes it again on the next regenerate.
+- **`TCPIP_STACK_InitCallback` is declared `extern` by `initialization.c` and wired into
+  `TCPIP_STACK_Init()`, but MCC generates no definition** → linker error
+  `undefined reference to 'TCPIP_STACK_InitCallback'`. Solution implemented **in `app.c`**
+  (user code, see rule 1): returns a persistent pointer to a `static TCPIP_STACK_INIT` struct
+  holding the same values that `initialization.c` builds locally anyway, and returns `0`
+  immediately (no asynchronous wait needed).
+- **Activating the bridge is done via a checkbox per network interface component**, not via a
+  dedicated MCC component and not by manually adding `TCPIP_STACK_USE_MAC_BRIDGE` & co.: in the
+  MCC component model, each `tcpipNetConfig_N` component (NETCONFIG-0/NETCONFIG-1 in the
+  data-link graph) carries a boolean field `TCPIP_NETWORK_MACBRIDGE_ADD_IDXn` — set to `true`
+  for both interfaces in the sister project (`Add to MAC Bridge` in the properties). Enable it
+  on NETCONFIG-0 and NETCONFIG-1 there, then Generate — MCC automatically produces the
+  `TCPIP_STACK_USE_MAC_BRIDGE` block in `configuration.h` as well as `tcpipMacbridgeTable`/
+  `tcpipBridgeInitData` and the `{TCPIP_MODULE_MAC_BRIDGE, ...}` entry in `initialization.c`.
+  **Activated since 2026-08-30 and confirmed as a fully working end-to-end bridge** (ping
+  matrix, `bridge status/stats/fdb`, see `docs\session-log.md`).
+- **`nbproject\configurations.xml`'s `languageToolchainVersion`** can differ from the compiler
+  actually used at link time (in our case `4.60` was recorded, but the real link used `v5.10`,
+  visible from the `xc32-gcc.exe` path in the build log) — when in doubt, check the path in the
+  build log, not just this field.
+- **Silicon errata: `OSCCTRL_DPLLSYNCBUSY.DPLLRATIO` never clears**, even though the DPLL locks
+  correctly — Microchip Silicon Errata **DS80000748K** ("SAM D5x/E5x Family Silicon Errata and
+  Data Sheet Clarification"), item **2.13.2 "FDPLL Ratio in DPLLnRATIO"**, affects both silicon
+  revisions (A and D), so this board too. The MCC-generated, unmodified `FDPLL0_Initialize()`
+  code in `peripheral\clock\plib_clock.c` waits there with an unbounded `while(...)` loop →
+  **complete boot hang, before any app code even runs**, reproducible depending on seemingly
+  unrelated linker address shifts elsewhere in the image (bisected for hours on 2026-08-30/31,
+  see `docs\session-log.md`). Confirmed via direct register access: `DPLLRATIO` (`0x40001034`)
+  takes the value correctly, `DPLLSTATUS` (`0x40001040`) shows `LOCK|CLKRDY` — only
+  `DPLLSYNCBUSY` (`0x4000103C`) incorrectly stays stuck. **Fix (documented exception, no MCC GUI
+  field for this):** in `FDPLL0_Initialize()`, all three wait loops (`DPLLSYNCBUSY.DPLLRATIO`,
+  `.ENABLE`, `DPLLSTATUS.LOCK|CLKRDY`) were given a count limit
+  (`CLOCK_DPLL0_SYNC_TIMEOUT = 2000`) instead of polling forever — reapply after every Generate
+  run that touches `plib_clock.c`. **Caution when debugging this file:** a naive
+  `pyocd commander -M attach -c halt` snapshot showed the PC in `__dinit_clear`/C runtime
+  startup — both on the hanging build AND on a known-good build (sampling artifact of this
+  attach mode, not a real finding). Only direct register values
+  (`DPLLSTATUS`/`DPLLRATIO`/`DPLLSYNCBUSY`) or `-M pre-reset` with PC comparison across multiple
+  calls are reliable.
+- **App bug (not an MCC topic, but the same boot hang masked it):** `MIRROR_Initialize()`
+  (`port_mirror.c`) immediately allocates 8 packet buffers from the TCP/IP heap
+  (`TCPIP_PKT_PacketAlloc()`). If it's called — as initially ported — directly from
+  `APP_Initialize()`, it crashes with a genuine bus fault (wild pointer, `BFAR` outside
+  flash/RAM), because `APP_Initialize()` still runs synchronously inside `SYS_Initialize()`
+  (`initialization.c`, right after `TCPIP_STACK_Init()`), but at that point the TCP/IP heap
+  isn't necessarily fully set up yet (`TCPIP_STACK_Init()` only kicks off the actual,
+  asynchronous stack initialization). **Fix:** `MIRROR_Initialize()` moved to `app.c`'s already
+  existing `APP_STATE_SERVICE_TASKS` phase (the same place where packet handler registration
+  and `env_apply()` already wait for a running stack). The other three ported modules
+  (`lan865x_diag`/`noip_test`/`testserver`) only register CLI commands in their `_Initialize()`
+  (no heap access) and are unaffected by this.
+- **Telnet login always showed "Access denied" — fixed 2026-08-31, the same bug class as
+  `MIRROR_Initialize()` above.** `TCPIP_TELNET_AuthenticationRegister()` was likewise called from
+  `APP_Initialize()` — the registration reported success, but was silently overwritten shortly
+  after by `TCPIP_TELNET_Initialize()` (`telnet.c`, MCC-generated, line ~317:
+  `telnetAuthHandler = NULL;`), because that module init only runs later as part of
+  `TCPIP_STACK_Init()`'s asynchronous initialization. Every real login attempt therefore hit
+  `telnetAuthHandler == NULL` and was rejected without ever calling our handler. **Fix:**
+  registration moved after `APP_STATE_SERVICE_TASKS`, right behind `MIRROR_Initialize()`.
+  **Verified** via a raw Python socket test plus a parallel `tshark` capture on `tcp port 23`:
+  `Logged in successfully` instead of `Access denied`.
+- **Telnet commands were never recognized ("Please type in a command" on every line) — fixed
+  2026-08-31.** TeraTerm sends each character individually and Enter as **`0d 00`
+  (CR NUL)**, not CR LF (confirmed via a `tshark` capture on `tcp port 23`, RFC 854 allows
+  both). `sys_command.c`'s (MCC-generated) character editor (`RunCmdTask()`) only recognizes
+  `\r`/`\n` as line terminators — the following NUL byte fell into the generic "insert
+  character" branch and ended up as the leading byte of the NEXT command buffer.
+  `strncpy()`/string functions treat a string starting with `\0` as empty, even if real text
+  follows afterwards — which is why each session's first command works, but every subsequent
+  one fails. **Fix (documented exception, `sys_command.c`):** new `else if (newCh == '\0')`
+  branch right after the `\r`/`\n` handling, which simply discards the byte.
+  `patches/sys_command.patch` newly created (the tool now covers 5 files).
+  **Verified:** two consecutive character-by-character `"help"` inputs over a raw socket as
+  well as live in TeraTerm — both now work reliably.
+- **All own commands sent their replies into the void over telnet — fixed 2026-08-31.** Direct
+  consequence of the login fix: commands were now parsed, but their output always ended up on
+  the serial console, never in the telnet client. Cause: all six own module files (`env.c`,
+  `app.c`, `port_mirror.c`, `lan865x_diag.c`, `noip_test.c`, `testserver.c`) used
+  `SYS_CONSOLE_PRINT()` (hard-wired to `SYS_CONSOLE_DEFAULT_INSTANCE`, i.e. always serial)
+  instead of the `pCmdIO` that every `SYS_CMD_FNC` handler receives — 231 occurrences. **Fix:**
+  new header `firmware/src/cmd_print.h` with `CMD_PRINT(pCmdIO, ...)`/`CMD_MSG(pCmdIO, str)`
+  (wrappers around `pCmdIO->pCmdApi->print/msg`), all command replies in all six files
+  converted; boot/background logs (no command context, e.g. `APP_Tasks()`'s packet log drain,
+  `TESTSERVER_Tasks()`'s connect/disconnect messages) deliberately left on `SYS_CONSOLE_PRINT`
+  unchanged. For `lan865x_diag.c`'s asynchronous register operations (result only arrives later
+  from `LAN865X_DIAG_Tasks()`, after the command handler has returned) additionally
+  `CMD_PRINT_OR_CONSOLE(pCmdIO, ...)` plus a remembered `s_diag_pCmdIO` (safe, because the
+  module only ever allows one operation at a time anyway, `LAN865X_DIAG_Busy()`). **Verified**
+  via a real telnet socket: `showenv`/`stats`/`meminfo`/`mirror`/`lanhelp` AND the two
+  asynchronous cases `lan_read`/`plca_stat` (including a chained RMW + multi-step read
+  sequence) now correctly deliver over telnet.
+- **Telnet output buffer too small for larger command outputs (e.g. `dump`/`netinfo`) —
+  2026-08-31, a real MCC configuration field, no hand patch.**
+  `TCPIP_TELNET_SKT_TX_BUFF_SIZE` was set to `0` (= framework default), noticeably too small
+  (`F_Telnet_MSG()` in `telnet.c` discards the return value of `NET_PRES_SocketWrite()` — what
+  doesn't fit into the buffer is silently lost). Test series with `dump <addr> <size>` (size
+  freely chosen) plus `netinfo` over a real telnet socket: 0 already truncates at 200 bytes;
+  2048 covers 200, not 500/800; **3072 fully covers 200 and 500** (not 800); 4096 covers all
+  three, but pushes the largest free TCP/IP heap block down to only ~720 bytes after a
+  connect/dump/disconnect cycle — too tight given previous heap-exhaustion bugs in this
+  project. **Set to 3072** as a middle ground (currently a hand edit in `configuration.h` for
+  the test series — must also be set via MCC's telnet server component before the next Generate
+  Code, otherwise it silently falls back to 0 on regenerate). Side finding, independent of
+  buffer size: the free TCP/IP heap drops from ~17 KB (fresh boot) to ~3.8 KB after a single
+  telnet connection and stays fragmented (largest block only ~1.6 KB) — not investigated
+  further yet.
+- **`dump` produced broken/corrupted output for larger byte counts (e.g. 500) — self-inflicted
+  from the fix above, resolved 2026-08-31.** When splitting `DumpMem()` into a `pCmdIO`-capable
+  `CmdDumpMem()` (for the `dump` command), the original's busy-wait guard
+  (`SYS_CONSOLE_WriteFreeBufferCountGet()`, serial-specific — there's no equivalent for telnet
+  via `pCmdIO`) got lost. `CmdDumpMem()` printed lines unthrottled at CPU speed, thereby
+  outrunning both the serial 1024-byte ring buffer (`SERCOM1_USART_Write()` silently discards
+  what doesn't fit) and telnet's `F_Telnet_MSG()` (likewise discards
+  `NET_PRES_SocketWrite()`'s return value) — result: not just truncation, but **corrupted,
+  interleaved bytes** in the middle of the output.
+  **First fix (discarded):** a fixed 10ms pacing pause after every line — worked, but throttled
+  EVERY dump unnecessarily, even far too-small ones. **Better fix (user's idea: "the
+  backpressure had already worked in the sister project"):** deliberately reused the ORIGINAL
+  `SYS_CONSOLE_WriteFreeBufferCountGet()` busy-wait from `DumpMem()`, with no device detection
+  at all — the trick: this check only depends on the serial ring buffer, which is practically
+  always free during a telnet-triggered dump (nothing else is writing serially at the same
+  time), so it reports "enough room" almost immediately there and effectively doesn't throttle;
+  for a serially triggered dump, the exact same precise, load-adaptive throttling as before
+  kicks in. `app_wait_ms()` removed again. **Verified:** identical results to the fixed pause
+  (serial `dump 800` complete and clean; telnet `dump 500` complete, `dump 800` cleanly cut off
+  at the 3072-byte buffer limit, `netinfo` complete) — now without artificial delay on
+  small/telnet dumps.
+- **Real telnet backpressure in `F_Telnet_MSG()` — fixed 2026-08-31.** The fix above only works
+  around the buffer limit, it doesn't cover it: output beyond `TCPIP_TELNET_SKT_TX_BUFF_SIZE`
+  (3072 bytes) remained truncated. First attempt — a bounded busy-wait on
+  `NET_PRES_SocketWriteIsReady()`, with an added `NET_PRES_SocketFlush()` too — achieved
+  **nothing** (`dump 800` still only ~3080 of ~4011 bytes, but taking 6.6s instead of nearly
+  instant). Cause: in this bare-metal single-superloop setup, `SYS_CMD_Tasks()` — which calls
+  the command handler and through it `F_Telnet_MSG()` — runs in `SYS_Tasks()`
+  (`config/default/tasks.c`) **before** `TCPIP_STACK_Task()`/`NET_PRES_Tasks()`. Nothing drains
+  the telnet send buffer as long as those two haven't run — unlike UART, where a hardware
+  interrupt keeps running independently of the main loop. User question: "would it be possible
+  to call `SYS_Tasks()` while waiting?" — answer: not the whole function (would recurse into
+  `SYS_CMD_Tasks()` itself — the currently active stack frame with its own static parser state
+  — and into `APP_Tasks()`), but exactly the two relevant calls are never reentrant from within
+  `F_Telnet_MSG()` (this function is only ever reached via the `SYS_CMD_API` `.msg`/`.print`
+  callbacks, so only from `SYS_CMD_Tasks()`, a sibling of `TCPIP_STACK_Task()` inside
+  `SYS_Tasks()`, never nested inside it). New `APP_PumpNetworkStack()` (`app.c`/`app.h`) wraps
+  `TCPIP_STACK_Task(sysObj.tcpip)` + `NET_PRES_Tasks(sysObj.netPres)`; `F_Telnet_MSG()`'s
+  busy-wait calls it instead of just spinning. **Verified:** `dump 800/2000/4000/8000` all
+  complete (4011/9938/19813/39554 bytes) in a constant ~1.8–2.2s instead of cutting off at
+  ~3072 bytes; `netinfo` also complete. New hand patch `patches/telnet.patch`, details:
+  `docs/mcc-generated-code-patches.md` item 8.
+- **Follow-up: `F_Telnet_MSG()` still intermittently corrupted large dumps — fixed
+  2026-08-31.** User test with `dump 0x20000000 32000` showed: occasionally (not on every run —
+  a timing race, not a fixed size threshold) the end of a line was missing (e.g. only 9 instead
+  of 16 ASCII dots) and the **next** line's address was appended directly without `\n\r` —
+  total byte count varied on every run (158020/158029/157993/158065/158212). Cross-checked at
+  the user's request via a `tshark` capture (`follow,tcp,raw`): the wire shows the same content
+  as the Python client, not a client artifact — this particular capture run happened to go
+  through cleanly, which fits the race-condition theory (a deterministic bug would occur
+  identically every time). Cause: `NET_PRES_SocketWriteIsReady()`'s pre-check doesn't reliably
+  predict what a single `NET_PRES_SocketWrite()` call actually accepts — the return value was
+  still discarded, the same "fire and forget" bug class as with the serial
+  `SERCOM1_USART_Write()`, just intermittent instead of consistent. Fixed by looping on the
+  real return value: write the remainder again, calling `APP_PumpNetworkStack()` in between,
+  bounded by the existing 500ms timeout. User question whether `CmdDumpMem()`'s own serial
+  busy-wait (`SYS_CONSOLE_WriteFreeBufferCountGet(...) < pos`) should now "also work for UART
+  and telnet" — answer: it already does, for two different reasons (serial throttling for
+  UART, harmless immediate pass-through for telnet, since real telnet correctness now lives
+  entirely in `F_Telnet_MSG()`) — the related comment in `app.c` was outdated (falsely claimed
+  correctness came from the buffer size `TCPIP_TELNET_SKT_TX_BUFF_SIZE`) and was corrected.
+  **Verified:** `dump 0x20000000 32000` run 5× in a row, all 5 runs exactly 158065 bytes, no
+  more glued-together lines — previously different on every run.
+- **The LAN865x RX path had a genuine race condition — fixed 2026-08-31 (see
+  `docs/session-log.md` for the full derivation).** Original finding: `rxPkt->pDSeg->segLen`
+  deviated from the total length value declared in the IP header, and did so
+  **non-deterministically** — the same periodic message showed `88` and `102` bytes at
+  different times (true length: 98). Root cause found using the same methodology as in the
+  sister project (`FALLSTRICKE.md`, GMAC RX race, 2026-08-27): `_Lock()`/`_Unlock()` in
+  `drv_lan865x_api.c` merely wrap `OSAL_MUTEX_Lock/Unlock`, which on this bare-metal build
+  (`osal_impl_basic.h`) **is just a simple flag, it doesn't disable interrupts** — the SPI
+  transfer-complete callback `_EventHandlerSPI()` → `TC6_SpiBufferDone()` (runs from a genuine
+  hardware interrupt) can therefore fire at any time right in the middle of
+  `TC6_Service()`/`process_rx()`'s task-context processing — exactly the same bug class
+  (task-local "lock" that doesn't actually block the genuinely concurrent ISR).
+  **Fix (documented exception, `DRV_LAN865X_INSTANCES_NUMBER==1` in this project makes a
+  single stored interrupt-state variable safe):** `_Lock()`/`_Unlock()` now additionally wrap
+  `SYS_INT_Disable()`/`SYS_INT_Restore()` — a genuine critical section, as in the sister
+  project.
+  **Verified:** after the fix, the same test message showed a constant `102` across multiple
+  samples (no more scatter); the full `sniffer_capture_test.py` completeness test showed the
+  exact same `frame.len/ip.len/udp.length` combination for **all 3982** iperf UDP frames (zero
+  variance) — the non-deterministic component is demonstrably fixed.
+  **The residual issue left open back then (fixed, size-dependent offset: ~1512-byte frames 10
+  bytes short, ~98-byte frames 4 bytes too many) has since been root-caused and fixed —
+  2026-08-31, see `docs/session-log.md` for the full derivation.** Two independent, additive
+  effects, not a single chunk-boundary quirk:
+  1) `TC6_CB_OnRxEthernetPacket()` consistently reports `len`/`segLen` 4 bytes too large
+     (presumably the 4-byte FCS still delivered by the T1S PHY and never stripped, contrary to
+     `tcpip_mac.h`'s documented RX contract). At this point `len` and `segLen` still always
+     agree — no race, no corruption.
+  2) The generic, MCC-generated stack code (`library/tcpip/src/tcpip_manager.c`, line ~2544)
+     subtracts `sizeof(TCPIP_MAC_ETHERNET_HEADER)` (14) from that before passing it on to
+     registered packet handlers like `pktEth0Handler()`/`MIRROR_Eth0Rx()` — documented, correct
+     standard behavior of the framework, not a bug in itself.
+  **The actual bug (not MCC-generated, app code):** `port_mirror.c`'s `MIRROR_Eth0Rx()` used
+  `rxPkt->pDSeg->segLen` at this point directly as the full copy length starting at
+  `pMacLayer` — but there it actually means "payload after the 14-byte MAC header", not "full
+  frame length". Every sniffed/mirrored RX frame was thereby copied 14 bytes too short
+  (invisible for small frames as long as `MIRROR_SAFE_FRAME_LEN`'s clamp didn't kick in; very
+  visible for anything beyond a single TC6 SPI chunk). **Fix (one line):**
+  `rxPkt->pDSeg->segLen + sizeof(TCPIP_MAC_ETHERNET_HEADER)` passed as the frame length to
+  `mirror_ethpkt_to_eth1()` — deliberately only at the RX site, not in `mirror_eth0_tx_hook()`
+  (TX packets never go through the RX-side header subtraction, their `segLen` already means
+  "full frame length" there).
+  **Did in fact cause functional damage, contrary to what was originally noted here:** corrupt
+  sniffer captures (every large frame showed "Previous segment not captured"/"ACKed unseen
+  segment" in Wireshark) — normal bridge forwarding (`tcpip_mac_bridge.c`) never goes through
+  `MIRROR_Eth0Rx()` and was never affected.
+  **Verified** (twice: right after the fix and again after fully removing the diagnostic
+  instrumentation + a clean rebuild): `sniffer_capture_test.py` shows `COMPLETE` for UDP/TCP in
+  both directions, no more "shorter than IP/UDP header claims" warning; `tshark` confirms
+  `frame.len=1514`/`tcp.len=1460` (previously `1504`/`1450`) and zero
+  `tcp.analysis.lost_segment` hits.
+  The temporary diagnostic instrumentation (`g_tc6DiagEnable` in `tc6.c`/`drv_lan865x_api.c`,
+  plus the `MIRRORDIAG` added for it in `port_mirror.c`) has been fully removed again.
+- **`suppressTx` ported from the sister project (2026-08-31):** `setenv sniffer 1` +
+  `saveenv` previously only set the RAM flag "sniffer ON at boot", without actually muting the
+  T1S transmitter — confirmed via `lan_read 0x000308F9` (`T1SPMACTL`), which still showed `0x0`
+  right after boot instead of `0x4000` (TXD). Reason: the sister project has its own
+  `suppressTx` field in `DRV_LAN865X_Configuration` for this, which MCC doesn't generate here.
+  **Fix (documented exception, three hand patches):** `bool suppressTx;` added to
+  `drv_lan865x.h` (same position as in the sister project, after `rxCutThrough`); a new
+  `case 9` inserted into `drv_lan865x_api.c`'s `_InitUserSettings()` state machine, which
+  writes `T1SPMACTL=0x4000` when `drvCfg.suppressTx` is set — **before** the final
+  `NETWORK_CONTROL`/TXEN write (which was bumped from `case 9` to `case 10` for this); in
+  `initialization.c`, `.suppressTx = false,` added to the default initializer and
+  `drvLan865xInitData[0].suppressTx = env_sniffer();` added right next to the existing
+  `nodeId`/`nodeCount` assignment. **Verified:** `lan_read 0x000308F9` now shows `0x00004000`
+  right after boot, even before any `sniffer` command has run. Board reset back to
+  `sniffer OFF` after the test (register-confirmed).
 
 ---
 
-## 4. Schwesterprojekt als Referenz
+## 4. Sister project as reference
 
-`C:\work\t1s_bridge\bridge\t1s_100baset_bridge` — eigenes Git-Repo, eigene `CLAUDE.md` dort.
-Gleiche Hardware-Familie (SAM E54 + LAN865x per SPI + 100BASE-T-PHY per GMAC/RMII), bereits
-verifiziert lauffähig, dort **LAN8740A** auf einem `LAN8740A PHY Daughter Board (AC320004-3)`.
-Bei Unklarheiten zu Bridge-Konfiguration, GMAC/PHY-Init-Daten oder Pin-Belegung: die
-entsprechende generierte Datei (`initialization.c`, `configuration.h`,
-`peripheral\port\plib_port.c`, Komponenten-YAMLs unter
-`firmware\T1S_100BaseT_Bridge.X\T1S_100BaseT_Bridge_default\components\`) 1:1 dagegen diffen,
-bevor spekuliert wird — mehrfach der schnellste Weg zur echten Ursache.
+`C:\work\t1s_bridge\bridge\t1s_100baset_bridge` — own git repo, own `CLAUDE.md` there. Same
+hardware family (SAM E54 + LAN865x via SPI + 100BASE-T PHY via GMAC/RMII), already verified
+working, there using a **LAN8740A** on an `LAN8740A PHY Daughter Board (AC320004-3)`. For
+uncertainties about bridge configuration, GMAC/PHY init data, or pin mapping: diff the
+corresponding generated file (`initialization.c`, `configuration.h`,
+`peripheral\port\plib_port.c`, component YAMLs under
+`firmware\T1S_100BaseT_Bridge.X\T1S_100BaseT_Bridge_default\components\`) 1:1 against it before
+speculating — repeatedly the fastest path to the real root cause.
 
 ---
 
-## 5. Erkenntnisse festhalten
+## 5. Recording insights
 
-`C:\work` ist Wegwerf-Arbeitsbereich, Auto-Memory hängt am Pfad/Repo — Dauerhaftes deshalb hier
-in Abschnitt 3 ablegen (datiert, `YYYY-MM-DD — Fehler/Erkenntnis → Lösung`, ein bis zwei Sätze),
-nicht nur im Memory. Zieldatei vorher lesen, um Duplikate zu vermeiden. Besonders festhalten:
-Fehler samt richtiger Lösung, und Sackgassen („Weg A geht nicht, weil … → nicht nochmal
-versuchen"). Andere Markdown-Dokus (Messprotokolle, Vertiefungen) gehören nach `docs\`, nicht in
-diese Datei.
+`C:\work` is a throwaway workspace, auto-memory is tied to the path/repo — durable knowledge
+therefore goes here in section 3 (dated, `YYYY-MM-DD — bug/insight → fix`, one to two sentences),
+not only into memory. Read the target file first to avoid duplicates. Especially worth
+recording: bugs together with the correct fix, and dead ends ("approach A doesn't work because
+… → don't try it again"). Other Markdown docs (test logs, deep dives) belong under `docs\`, not
+in this file.
+
+This file was translated from German to English on 2026-09-01, at the user's request, so that
+other contributors to the project can benefit from it too (see section 0).

@@ -2,17 +2,17 @@
 """
 Bridge Status & Configuration GUI
 
-Bedient die T1S/100BASE-T-Bridge über den EDBG-COM-Port (115200 8N1):
-Bridge-Parameter, LAN8651-Register, IEEE-Testmodi und ein Terminal.
+Operates the T1S/100BASE-T bridge over the EDBG COM port (115200 8N1):
+bridge parameters, LAN8651 registers, IEEE test modes, and a terminal.
 
-Standalone bis auf zwei pip-Pakete: sv-ttk (Pflicht, fürs Theme) und pyserial
-(optional, ohne COM-Port-Zugriff läuft das Tool trotzdem) - dep_check.py
-prüft beides beim Start und bietet bei Bedarf setup_venv.bat an.
-Dazu bridge_config.json (liegt im json-Ordner im Repo-Root, zwei Ebenen über
-diesem Skript). Kein cli.py, kein test_lan8651.py --
-die öffnen den COM-Port selbst und kollidieren mit der Verbindung dieser GUI,
-weil der Port unter Windows exklusiv ist. Alle Kommandos laufen über den
-einen offenen Link.
+Standalone apart from two pip packages: sv-ttk (required, for the theme) and pyserial
+(optional, without COM port access the tool still runs) - dep_check.py
+checks both at startup and offers to run setup_venv.bat if needed.
+Also needs bridge_config.json (lives in the json folder in the repo root, two levels above
+this script). No cli.py, no test_lan8651.py --
+those open the COM port themselves and collide with this GUI's connection,
+because the port is exclusive under Windows. All commands go through the
+one open link.
 """
 
 import tkinter as tk
@@ -78,28 +78,28 @@ FLASH_SAME54_SCRIPT = Path(__file__).parent / "flash_same54.py"
 # reversible (wipes firmware AND the emulated EEPROM, both live in the same flash).
 ERASE_CONFIRM_WORD = "ERASE"
 
-# Das Registermodell: Adressen, Mnemonics, Bitfelder, Herkunft. Getrennt von der
-# Konfiguration, weil es etwas anderes ist -- eine aus dem Datenblatt abgeleitete
-# Referenz, auf die sich jemand verlaesst, der einen Fehler sucht. Die GUI liest es
-# und schreibt es NIE; Werte und Sitzungszustand gehoeren in bridge_config.json.
-# Stimmt etwas nicht, wird diese Datei korrigiert, nicht dieser Quelltext -- danach
-# "python scripts\check_register_model.py". lan8651_model.json liegt in json\
-# (Repo-Root), nicht neben diesem Skript.
+# The register model: addresses, mnemonics, bitfields, provenance. Kept separate from the
+# configuration because it is a different kind of thing -- a reference derived from the
+# datasheet that someone debugging an error relies on. The GUI reads it
+# and NEVER writes it; values and session state belong in bridge_config.json.
+# If something is wrong, fix this file, not this source code -- then run
+# "python scripts\check_register_model.py". lan8651_model.json lives in json\
+# (repo root), not next to this script.
 MODEL_FILE = Path(__file__).parent.parent / "json" / "lan8651_model.json"
 
-# Das Environment-Modell: welche Felder der EEPROM-Datensatz hat, wie sie aus showenv
-# gelesen und mit welchem CLI-Kommando sie geschrieben werden -- je Kennung und Version.
-# Firmware-Varianten teilen sich den EEPROM-Offset, aber nicht das Layout; deshalb wird
-# die Kennung vom Geraet gelesen und gegen dieses Modell gehalten, statt sie zu raten.
-# env_model.json liegt ebenfalls in json\ (Repo-Root).
+# The environment model: which fields the EEPROM record has, how they are read from showenv
+# and with which CLI command they are written -- per identifier and version.
+# Firmware variants share the EEPROM offset but not the layout; that's why
+# the identifier is read from the device and checked against this model instead of guessing it.
+# env_model.json also lives in json\ (repo root).
 ENV_MODEL_FILE = Path(__file__).parent.parent / "json" / "env_model.json"
 
 # Default configuration
-# Vorgaben, falls bridge_config.json fehlt. Die Registerkarte kommt dann NICHT
-# mit -- sie stammt aus dem Datenblatt (LAN8650-1-Data-Sheet-60001734.pdf,
-# Kapitel 11, 182 Register) und steht ausschliesslich in bridge_config.json.
-# Frueher standen hier von Hand ergaenzte Adressen; vier davon existierten gar
-# nicht und zwei trugen den falschen Namen, siehe CLAUDE.md Abschnitt 6.
+# Defaults for when bridge_config.json is missing. The register tab then does NOT
+# come along -- it comes from the datasheet (LAN8650-1-Data-Sheet-60001734.pdf,
+# chapter 11, 182 registers) and lives exclusively in bridge_config.json.
+# This used to hold hand-added addresses; four of them didn't exist
+# at all and two had the wrong name, see CLAUDE.md section 6.
 DEFAULT_CONFIG = {
     "comport": "COM8",
     "baudrate": 115200,
@@ -307,17 +307,17 @@ def get_available_com_ports() -> List[str]:
 
 
 class ResponseParser:
-    """Wertet die Antwortzeilen des Geräts aus.
+    """Evaluates the device's response lines.
 
-    Hier lief früher ein Unterprozess auf cli.py. Das ging nicht: cli.py öffnet
-    den COM-Port selbst (cli.py:47), und der ist unter Windows exklusiv -- solange
-    die GUI verbunden ist, bekommt der Unterprozess "Zugriff verweigert". Alle
-    Kommandos laufen deshalb über den bereits offenen Link
-    (BridgeGUI.send_command_via_link); übrig bleibt das Parsen.
+    This used to run a subprocess on cli.py. That didn't work: cli.py opens
+    the COM port itself (cli.py:47), and it is exclusive under Windows -- as long as
+    the GUI is connected, the subprocess gets "access denied". All
+    commands therefore go through the already-open link
+    (BridgeGUI.send_command_via_link); only the parsing remains here.
     """
 
     def parse_register_read(self, output: str) -> Optional[str]:
-        """Wert aus 'LAN865X Read OK: Addr=... Value=...' ziehen."""
+        """Extract the value from 'LAN865X Read OK: Addr=... Value=...'."""
         match = re.search(r'Value=0x([0-9A-Fa-f]+)', output)
         if match:
             return "0x" + match.group(1)
@@ -363,13 +363,13 @@ class BridgeGUI:
         self.config = self.load_config()
         self.model = self.load_model()
         self.env_model = self.load_env_model()
-        # Was das Geraet ueber sein Environment gemeldet hat. Bleibt None, solange nichts
-        # gelesen wurde -- die GUI behauptet dann nicht, sie wuesste, was im EEPROM steht.
+        # What the device reported about its environment. Stays None as long as nothing
+        # has been read -- the GUI then does not claim to know what is in the EEPROM.
         self.env_identity: Optional[dict] = None
         self.cli = ResponseParser()
         self.result_queue = queue.Queue()
         self.connected = False
-        self.port_link: Optional[Link] = None  # Globale Verbindung für CLI + Terminal
+        self.port_link: Optional[Link] = None  # Global connection for CLI + terminal
 
         # The path last picked via "Select Hex..." -- "Flash" uses this instead of
         # always RELEASE_HEX (release\bridge_lan865x_100baseT.hex) once one has been
@@ -377,15 +377,15 @@ class BridgeGUI:
         # persisted.
         self._selected_hex_path: Path = RELEASE_HEX
 
-        # Kommando-Antworten laufen über eine EIGENE Queue. Sonst konkurrieren
-        # terminal_process_queue() (Main-Thread, alle 30 ms) und der Worker-Thread
-        # um dieselben Chunks, und die Antwort kommt zerrissen an -> leere Felder.
+        # Command responses run through their OWN queue. Otherwise
+        # terminal_process_queue() (main thread, every 30 ms) and the worker thread
+        # compete for the same chunks, and the response arrives torn apart -> empty fields.
         self.cmd_response_q = queue.Queue()
         self.cmd_pending = threading.Event()
         self.cmd_lock = threading.Lock()
 
-        # Scrollbare Canvases (Register-Tab je MMS-Gruppe, Bridge-Parameter-Tab), fuer den
-        # EINEN globalen Mausrad-Handler in _register_wheel_canvas/_on_global_wheel.
+        # Scrollable canvases (register tab per MMS group, bridge parameter tab), for the
+        # ONE global mouse wheel handler in _register_wheel_canvas/_on_global_wheel.
         self._wheel_canvases: list = []
         self.root.bind_all("<MouseWheel>", self._on_global_wheel)
         self._bind_page_scroll_keys()
@@ -521,24 +521,24 @@ class BridgeGUI:
         walk(self.root)
 
     def _register_wheel_canvas(self, canvas: tk.Canvas) -> None:
-        """Ein scrollbares Canvas fuer den globalen Mausrad-Handler eintragen."""
+        """Register a scrollable canvas for the global mouse wheel handler."""
         self._wheel_canvases.append(canvas)
 
     def _bind_page_scroll_keys(self) -> None:
-        """Bild-hoch/-runter scrollt den sichtbaren Tab -- unabhaengig vom Mausrad.
+        """Page Up/Down scrolls the visible tab -- independent of the mouse wheel.
 
-        Reine Tastatur-Ereignisse sind von der Frage "welches Ereignis liefert das
-        Eingabegeraet ueberhaupt" ganz unabhaengig (siehe _on_global_wheel) und
-        funktionieren deshalb auch dort, wo MouseWheel nie ankommt -- etwa bei einem
-        Windows-Precision-Touchpad. Bewusst nur Prior/Next (Bild hoch/runter), nicht
-        Pfeiltasten oder Pos1/Ende: die wuerden in einem fokussierten Entry-Feld oder
-        einer Combobox mitlaufen (Cursor bewegen, Dropdown oeffnen) und die Ansicht dabei
-        ungefragt mitscrollen. Prior/Next sind dort standardmaessig unbelegt.
+        Pure keyboard events are completely independent of the question "which event does
+        the input device even deliver" (see _on_global_wheel), and therefore
+        also work where MouseWheel never arrives -- e.g. on a
+        Windows precision touchpad. Deliberately only Prior/Next (page up/down), not
+        arrow keys or Home/End: those would interfere in a focused entry field or
+        a combobox (moving the cursor, opening a dropdown) and would scroll the view
+        along unasked. Prior/Next are unassigned there by default.
 
-        Welches Canvas gerade "sichtbar" ist, wird ueber <<NotebookTabChanged>> auf
-        beiden Notebooks (Haupt-Tabs, Register-Untertabs) nachgefuehrt; die Terminal-
-        eigene Prior/Next-Bindung auf terminal_text hat dort weiterhin Vorrang, weil eine
-        Bindung auf der Widget-Instanz vor "all" (bind_all) ausgewertet wird.
+        Which canvas is currently "visible" is tracked via <<NotebookTabChanged>> on
+        both notebooks (main tabs, register subtabs); the terminal's
+        own Prior/Next binding on terminal_text still takes precedence there, because a
+        binding on the widget instance is evaluated before "all" (bind_all).
         """
         self._active_scroll_canvas: Optional[tk.Canvas] = None
 
@@ -550,11 +550,11 @@ class BridgeGUI:
         self.root.bind_all("<Next>", lambda e: _scroll_active(1))
 
     def _on_main_tab_changed(self, event=None):
-        """Haupt-Tab gewechselt: das dort scrollbare Canvas fuer Bild-hoch/-runter setzen.
+        """Main tab changed: set the canvas scrollable there for page up/down.
 
-        Bei "LAN8651 Registers" gilt der aktuell gewaehlte MMS-Untertab, nicht dieser Tab
-        selbst -- dafuer ist reg_notebook.select() bereits gueltig, weil das Untertab-
-        Notebook beim Anlegen des Haupt-Tabs mit aufgebaut wird.
+        For "LAN8651 Registers" the currently selected MMS subtab applies, not this tab
+        itself -- reg_notebook.select() is already valid for that, because the subtab
+        notebook gets built along with the main tab.
         """
         current = self.notebook.tab(self.notebook.select(), "text")
         if current == "Bridge Parameters":
@@ -566,44 +566,44 @@ class BridgeGUI:
         elif current == "Test Modes":
             self._active_scroll_canvas = getattr(self, "_testmodes_scroll_canvas", None)
         else:
-            # Terminal/Help scrollen nicht ueber ein registriertes Canvas.
+            # Terminal/Help do not scroll via a registered canvas.
             self._active_scroll_canvas = None
 
     def _on_reg_tab_changed(self, event=None):
-        """MMS-Untertab gewechselt: dessen Canvas fuer Bild-hoch/-runter uebernehmen.
+        """MMS subtab changed: adopt its canvas for page up/down.
 
-        Das Register-Untertab-Notebook waehlt beim Aufbau intern seinen ersten Tab aus
-        und feuert dabei sein EIGENES <<NotebookTabChanged>> -- unabhaengig davon, ob
-        "LAN8651 Registers" ueberhaupt der sichtbare Haupttab ist. Ohne diese Pruefung
-        ueberschreibt dieses interne Ereignis das richtige Canvas des Bridge-Parameter-
-        Tabs, sobald der Nutzer die Register-Untertabs auch nur EINMAL beim Programmstart
-        intern durchlaeuft (was Tk beim Aufbau selbst tut).
+        The register subtab notebook internally selects its first tab while building
+        and in doing so fires its OWN <<NotebookTabChanged>> -- regardless of whether
+        "LAN8651 Registers" is even the visible main tab. Without this check,
+        this internal event overwrites the correct canvas of the bridge parameter
+        tab as soon as the user's register subtabs are run through internally even
+        ONCE at program startup (which Tk itself does while building).
         """
         if self.notebook.tab(self.notebook.select(), "text") != "LAN8651 Registers":
             return
         self._active_scroll_canvas = self._reg_tab_canvases.get(self._reg_notebook.select())
 
     def _on_global_wheel(self, event):
-        """EIN Handler fuers ganze Fenster statt Enter/Leave je Canvas.
+        """ONE handler for the whole window instead of Enter/Leave per canvas.
 
-        Bleibt fuer eine echte Maus stehen: EIN Handler haengt global (`bind_all`) und
-        feuert bei jedem MouseWheel-Ereignis, egal welches Widget es technisch zugestellt
-        bekam -- er entscheidet selbst, was gescrollt wird, ueber die tatsaechliche
-        Zeigerposition (`event.x_root/y_root`) und `winfo_containing`.
+        Stays correct for a real mouse: ONE handler is attached globally (`bind_all`) and
+        fires on every MouseWheel event, regardless of which widget technically
+        received it -- it decides for itself what gets scrolled, via the actual
+        pointer position (`event.x_root/y_root`) and `winfo_containing`.
 
-        Auf DIESEM Rechner reicht das allein nicht: ein isolierter Test (nur ein Canvas,
-        sonst nichts) zeigte hunderte Enter/Motion-Ereignisse, aber KEIN einziges
-        MouseWheel, obwohl real gescrollt wurde -- das Geraet ist ein Windows-Precision-
-        Touchpad, dessen Zwei-Finger-Geste bei Tk-Fenstern gar kein WM_MOUSEWHEEL
-        ausloest. Kein Bindungsproblem, das Ereignis kommt nie an. Deshalb zusaetzlich
-        die Tastatur-Bindungen unten (_bind_page_scroll_keys) als Weg, der nicht von der
-        Zustellung dieses Ereignisses abhaengt.
+        On THIS machine that alone isn't enough: an isolated test (only one canvas,
+        nothing else) showed hundreds of Enter/Motion events but NOT a single
+        MouseWheel, even though real scrolling happened -- the device is a Windows precision
+        touchpad, whose two-finger gesture doesn't trigger WM_MOUSEWHEEL at all
+        for Tk windows. Not a binding problem, the event simply never arrives. Hence
+        additionally the keyboard bindings below (_bind_page_scroll_keys) as a path that does
+        not depend on this event's delivery.
         """
         try:
             target = self.root.winfo_containing(event.x_root, event.y_root)
         except KeyError:
-            # winfo_containing kann das werfen, wenn der Zeiger gerade ueber einem
-            # Widget eines fremden Toplevels/Prozesses steht.
+            # winfo_containing can throw this when the pointer is currently over a
+            # widget of a foreign toplevel/process.
             return
         while target is not None:
             if target in self._wheel_canvases:
@@ -627,11 +627,11 @@ class BridgeGUI:
         return f"{width}x{height}+{x}+{y}"
 
     def load_model(self) -> dict:
-        """Das Registermodell laden. Fehlt es, wird das GESAGT, nicht verschwiegen.
+        """Load the register model. If it is missing, this is STATED, not hidden.
 
-        Ein leerer Registertab waere die schlechteste Antwort: die GUI saehe funktionsfaehig
-        aus und haette nur keine Register. Wer hier debuggt, soll wissen, dass ihm die
-        Referenz fehlt.
+        An empty register tab would be the worst answer: the GUI would look functional
+        and simply have no registers. Whoever is debugging here should know that the
+        reference is missing.
         """
         try:
             with open(MODEL_FILE, "r", encoding="utf-8") as f:
@@ -652,7 +652,7 @@ class BridgeGUI:
         return model
 
     def load_env_model(self) -> dict:
-        """Das Environment-Modell laden. Fehlt es, bleibt der Parametertab leer und sagt es."""
+        """Load the environment model. If it is missing, the parameter tab stays empty and says so."""
         try:
             with open(ENV_MODEL_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -671,12 +671,12 @@ class BridgeGUI:
             return {}
 
     def env_entry_for(self, identity: Optional[dict]) -> dict:
-        """Modelleintrag zu EINER Kennung -- ohne den Zustand der GUI zu befragen.
+        """Model entry for ONE identity -- without querying the GUI's state.
 
-        Der Worker braucht das: er hat die Kennung gerade erst aus derselben showenv-Ausgabe
-        gezogen, self.env_identity wird aber erst im Main-Thread gesetzt. Griffe er auf
-        env_entry() zurueck, deutete er die Werte nach dem ALTEN Stand -- und die GUI zeigte
-        gefuellte Felder unter einer Zeile, die sagt, sie seien nicht gedeutet.
+        The worker needs this: it has just pulled the identity from the same showenv output,
+        but self.env_identity is only set in the main thread. If it fell back to
+        env_entry(), it would interpret the values against the OLD state -- and the GUI would show
+        filled fields under a line saying they aren't interpreted.
         """
         envs = self.env_model.get("environments", {})
         if not envs:
@@ -702,12 +702,12 @@ class BridgeGUI:
         return {}
 
     def env_entry(self) -> dict:
-        """Der Modelleintrag, nach dem die GUI gerade arbeitet.
+        """The model entry the GUI is currently working against.
 
-        Solange das Geraet nichts gemeldet hat, ist das der einzige bzw. erste Eintrag --
-        die Felder muessen ja aufgebaut werden, bevor jemand verbindet. Nach dem Lesen der
-        Kennung wird der passende Eintrag genommen; gibt es keinen, ist das Ergebnis leer
-        und die GUI zeigt die Werte als nicht deutbar an, statt sie zu erfinden.
+        As long as the device has not reported anything, this is the only or first entry --
+        the fields have to be built before anyone connects. After reading the
+        identity, the matching entry is taken; if there isn't one, the result is empty
+        and the GUI shows the values as not interpretable instead of making them up.
         """
         envs = self.env_model.get("environments", {})
         if not envs:
@@ -717,13 +717,13 @@ class BridgeGUI:
         return next(iter(envs.values()))
 
     def env_identity_label_color(self, ok: bool) -> None:
-        """Grau, solange alles zusammenpasst - rot, sobald es das nicht tut."""
+        """Gray as long as everything matches - red as soon as it doesn't."""
         widget = getattr(self, "_env_identity_widget", None)
         if widget is not None:
             widget.configure(foreground="#555" if ok else "#b00")
 
     def env_identity_line(self) -> str:
-        """Die Zeile ueber dem Parametertab: was im EEPROM steht und ob wir es deuten koennen."""
+        """The line above the parameter tab: what is in the EEPROM and whether we can interpret it."""
         if not self.env_model:
             return "no environment model loaded"
         if not self.env_identity:
@@ -738,9 +738,9 @@ class BridgeGUI:
             if ident.get("eeprom_id") == ident.get("firmware_id") and crc == "ok":
                 note = "model fits"
             elif crc == "ok":
-                # Kein Fehler: die Firmware liest diese Alt-Kennung noch und hat den
-                # Datensatz angenommen -- sonst gaebe es hier keinen Modelleintrag. Beim
-                # naechsten saveenv schreibt sie ihn mit der neuen Kennung zurueck.
+                # Not an error: the firmware still reads this legacy identity and has accepted the
+                # record -- otherwise there would be no model entry here. On the
+                # next saveenv it writes it back with the new identity.
                 note = (f"legacy id, accepted by the firmware - the next "
                         f"'{entry.get('commands', {}).get('persist', 'saveenv')}' "
                         f"rewrites it as {ident.get('firmware_id')}")
@@ -760,8 +760,8 @@ class BridgeGUI:
                 f"{ident.get('firmware_variant', '')}")
 
     def model_source_line(self) -> str:
-        """Einzeiler zur Herkunft, den die GUI anzeigt -- damit sie nicht mehr behauptet,
-        als sie belegen kann."""
+        """One-liner about provenance that the GUI displays -- so it never claims
+        more than it can back up."""
         if not self.model:
             return "no register model loaded"
         ds = self.model.get("sources", {}).get("datasheet", {})
@@ -793,12 +793,12 @@ class BridgeGUI:
         return DEFAULT_CONFIG.copy()
 
     def save_config(self):
-        """Konfiguration schreiben -- erst serialisieren, dann ersetzen.
+        """Write configuration -- serialize first, then replace.
 
-        open(..., 'w') leert die Datei beim Öffnen; scheitert json.dump danach,
-        ist die Registerkarte weg. Deshalb zuerst in Bytes wandeln (ein Fehler
-        fliegt dann, bevor irgendetwas angefasst wird), in eine Nachbardatei
-        schreiben und erst zum Schluss über os.replace austauschen.
+        open(..., 'w') empties the file when opened; if json.dump then fails,
+        the register tab is gone. So convert to bytes first (an error then
+        is raised before anything is touched), write to a neighboring file,
+        and only at the end swap it in via os.replace.
         """
         data = json.dumps(self.config, indent=2, ensure_ascii=False).encode("utf-8")
         tmp = CONFIG_FILE.with_suffix(".json.tmp")
@@ -862,13 +862,13 @@ class BridgeGUI:
         # Notebook (tabs)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        # Binding VOR den add()-Aufrufen: <<NotebookTabChanged>> wird von Tk nicht
-        # synchron ausgeloest, sondern erst beim naechsten Event-Loop-Durchlauf (also
-        # fruehestens beim ersten mainloop()/update()) verarbeitet. Zu dem Zeitpunkt ist
-        # der Tab-Aufbau laengst fertig, die Zielattribute existieren also -- der Handler
-        # ist damit die einzige Quelle der Wahrheit, kein Wettlauf mit einer expliziten
-        # Zuweisung am Ende, die dieses nachgeholte Ereignis sonst stillschweigend
-        # ueberschreibt.
+        # Binding BEFORE the add() calls: <<NotebookTabChanged>> is not fired
+        # synchronously by Tk, but only processed on the next event loop pass (i.e.
+        # at the earliest on the first mainloop()/update()). By that time
+        # the tab construction has long finished, so the target attributes exist -- the handler
+        # is thus the single source of truth, no race with an explicit
+        # assignment at the end, which this deferred event would otherwise silently
+        # overwrite.
         self.notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
 
         self.create_bridge_tab()
@@ -877,8 +877,8 @@ class BridgeGUI:
         self.create_terminal_tab()
         self.create_about_tab()
 
-        # Sofortiger Startwert, falls aus irgendeinem Grund kein <<NotebookTabChanged>>
-        # nachgeholt wird -- "Bridge Parameters" ist der initial sichtbare Tab.
+        # Immediate starting value in case no <<NotebookTabChanged>>
+        # is ever delivered for some reason -- "Bridge Parameters" is the initially visible tab.
         self._active_scroll_canvas = self._bridge_scroll_canvas
 
     # Columns per quick-command group. Fixed rather than computed from the pane width:
@@ -918,9 +918,9 @@ class BridgeGUI:
         # Fields dictionary
         self.bridge_fields: Dict[str, tk.StringVar] = {}
 
-        # Kennung des Environments ganz oben, VOR dem Paned-Bereich - der fuellt mit
-        # expand=True den Rest, ein spaeter gepacktes Label landete darunter. Sie
-        # entscheidet, ob die Werte unten bedeuten, was die Beschriftung sagt.
+        # Environment identity right at the top, BEFORE the paned area - that fills
+        # the rest with expand=True, a label packed later would land below it. It
+        # decides whether the values below mean what the label says.
         self.env_identity_var = tk.StringVar(value=self.env_identity_line())
         self._env_identity_widget = ttk.Label(frame, textvariable=self.env_identity_var,
                                               foreground="#555", wraplength=1150,
@@ -948,41 +948,41 @@ class BridgeGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Die Felder kommen aus env_model.json, nicht aus einer Liste im Quelltext: welche
-        # es gibt, haengt an Kennung und Version des Geraets, und genau das ist der Punkt.
+        # The fields come from env_model.json, not from a list in the source code: which
+        # ones exist depends on the device's identity and version, and that is exactly the point.
         saved = self.config.get("bridge", {})
-        # Der Normalfall: das Kommando, das den Wert dauerhaft macht. Felder, die genau so
-        # wirken, brauchen keinen Hinweis - nur die Ausreisser bekommen einen.
+        # The normal case: the command that makes the value permanent. Fields that behave
+        # exactly like this need no hint - only the outliers get one.
         default_applies = self.env_entry().get("commands", {}).get("persist", "saveenv")
         for key, fld in self.env_entry().get("fields", {}).items():
             self.bridge_fields[key] = tk.StringVar(value=str(saved.get(key, "")))
             row = ttk.Frame(scrollable_frame)
             row.pack(fill=tk.X, padx=5, pady=(4, 0))
 
-            # Kein Read/Write je Feld: das Environment wird als Ganzes gelesen ("Read
-            # Environment", ein showenv) und als Ganzes geschrieben ("Write Environment", ein saveenv).
-            # Ein einzelnes Feld isoliert zu schreiben ergibt hier keinen Sinn, den die
-            # Register-Tabelle nebenan hat - dort ist jedes Register ein eigenständiger
-            # Zugriff, hier ist es ein gemeinsamer Datensatz.
+            # No read/write per field: the environment is read as a whole ("Read
+            # Environment", a showenv) and written as a whole ("Write Environment", a saveenv).
+            # Writing a single field in isolation makes no sense here, unlike the
+            # register table next door - there every register is its own
+            # access, here it is one shared record.
             ttk.Label(row, text=fld.get("label", key) + ":", width=22).pack(side=tk.LEFT)
             ttk.Entry(row, textvariable=self.bridge_fields[key], width=30).pack(side=tk.LEFT, padx=5)
 
-            # Wann der Wert wirkt -- aber NUR, wenn es vom Normalfall abweicht. Fuer elf
-            # der dreizehn Felder ist das saveenv, und eine Zeile "mask0 -> saveenv" unter
-            # "mask eth0:" wiederholt bloss die Beschriftung. Uebrig bleiben die zwei
-            # Faelle, die wirklich ueberraschen: die MAC wirkt erst nach einem Reset, der
-            # Mirror erst beim naechsten Boot. Die stehen dafuer in der Zeile und in Rot.
+            # When the value takes effect -- but ONLY if it deviates from the normal case. For eleven
+            # of the thirteen fields that is saveenv, and a line "mask0 -> saveenv" under
+            # "mask eth0:" would just repeat the label. What remains are the two
+            # cases that are genuinely surprising: the MAC only takes effect after a reset, the
+            # mirror only on the next boot. Those are shown in the line, and in red.
             applies = fld.get("applies", "")
             if applies and applies != default_applies:
                 ttk.Label(row, text=f"  {applies}", font=("Courier", 8),
                           foreground="#b00").pack(side=tk.LEFT)
 
-        # Mausrad: dieses Canvas nur in die zentrale Liste eintragen. Die eigentliche
-        # Zustellung erledigt EIN globaler Handler (siehe _register_wheel_canvas) - siehe
-        # dort, warum weder Enter/Leave am Canvas noch eine direkte Bindung auf die
-        # Kind-Widgets zuverlaessig war.
+        # Mouse wheel: just register this canvas in the central list. The actual
+        # delivery is handled by ONE global handler (see _register_wheel_canvas) - see
+        # there for why neither Enter/Leave on the canvas nor a direct binding on the
+        # child widgets was reliable.
         self._register_wheel_canvas(canvas)
-        self._bridge_scroll_canvas = canvas  # fuer den Bild-hoch/-runter-Fallback
+        self._bridge_scroll_canvas = canvas  # for the page up/down fallback
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -1042,25 +1042,25 @@ class BridgeGUI:
 
         self.register_fields: Dict[str, tk.StringVar] = {}
         self.register_categories: Dict[str, List[str]] = {}
-        # Registerkarte (Name/Beschreibung/Bitfelder je Adresse) im Speicher halten.
-        # Ohne die schrieb save_registers_json nur {Adresse: Wert} zurück und hat
-        # die aus dem Datenblatt erzeugte Karte beim ersten Speichern vernichtet.
+        # Keep the register map (name/description/bitfields per address) in memory.
+        # Without it, save_registers_json only wrote back {address: value} and
+        # destroyed the map generated from the datasheet on the first save.
         self.register_meta: Dict[str, dict] = {}
 
-        # Herkunftszeile: welches Dokument, welche Revision, wie viel davon abgeglichen.
-        # Steht bewusst oben und nicht in einem Hilfetext -- wer Register liest, soll
-        # sehen, worauf er sich gerade verlaesst.
+        # Provenance line: which document, which revision, how much of it was checked.
+        # Deliberately shown at the top, not in a help text -- whoever reads registers should
+        # see what they are currently relying on.
         ttk.Label(frame, text=self.model_source_line(), foreground="#555").pack(
             anchor="w", padx=8, pady=(4, 0))
 
         # Create sub-notebook for register categories
         reg_notebook = ttk.Notebook(frame)
         reg_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self._reg_notebook = reg_notebook            # fuer den Bild-hoch/-runter-Fallback
-        self._reg_tab_canvases: Dict[str, tk.Canvas] = {}  # Tab-Name (Widgetpfad) -> Canvas
+        self._reg_notebook = reg_notebook            # for the page up/down fallback
+        self._reg_tab_canvases: Dict[str, tk.Canvas] = {}  # tab name (widget path) -> canvas
         reg_notebook.bind("<<NotebookTabChanged>>", self._on_reg_tab_changed)
 
-        # Die Karte kommt aus dem Modell, die zuletzt gelesenen Werte aus der Config.
+        # The map comes from the model, the last-read values come from the config.
         registers = {name: g.get("registers", {})
                      for name, g in self.model.get("groups", {}).items()}
         saved_values = self.config.get("values", {})
@@ -1071,12 +1071,12 @@ class BridgeGUI:
             category_frame = ttk.Frame(reg_notebook)
             reg_notebook.add(category_frame, text=category)
 
-            # Scrollbarer Bereich. Die Bindungen MÜSSEN das Canvas dieses
-            # Durchlaufs festhalten (Default-Argument): ein `lambda e: canvas...`
-            # greift auf die Schleifenvariable zu, und die zeigt nach dem letzten
-            # Durchlauf für ALLE Tabs auf dasselbe, zuletzt erzeugte Canvas --
-            # dann bekommt nur der letzte Tab eine gültige scrollregion und alle
-            # anderen lassen sich nicht über die sichtbare Höhe hinaus scrollen.
+            # Scrollable area. The bindings MUST capture this iteration's
+            # canvas (default argument): a `lambda e: canvas...`
+            # accesses the loop variable, and after the last
+            # iteration that points to the same, last-created canvas for ALL tabs --
+            # then only the last tab gets a valid scrollregion and all
+            # the others can't be scrolled past the visible height.
             canvas = tk.Canvas(category_frame, highlightthickness=0)
             scrollbar = ttk.Scrollbar(category_frame, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas)
@@ -1087,14 +1087,14 @@ class BridgeGUI:
                 cv.configure(scrollregion=cv.bbox("all"))
 
             def _on_canvas(event, cv=canvas, wid=inner_id):
-                # Inhalt auf die volle Canvasbreite ziehen, sonst klebt alles links
+                # Stretch the content to the full canvas width, otherwise everything sticks to the left
                 cv.itemconfigure(wid, width=event.width)
                 cv.configure(scrollregion=cv.bbox("all"))
 
             scrollable_frame.bind("<Configure>", _on_content)
             canvas.bind("<Configure>", _on_canvas)
-            # Mausrad: dieses Canvas nur in die zentrale Liste eintragen, siehe
-            # _register_wheel_canvas fuer den eigentlichen (globalen) Handler.
+            # Mouse wheel: just register this canvas in the central list, see
+            # _register_wheel_canvas for the actual (global) handler.
             self._register_wheel_canvas(canvas)
             self._reg_tab_canvases[str(category_frame)] = canvas
 
@@ -1102,7 +1102,7 @@ class BridgeGUI:
             for addr, info in regs.items():
                 self.register_fields[addr] = tk.StringVar(value=saved_values.get(addr, ""))
 
-                # Modellformat: mnemonic + name, bits als Objekte mit name/description.
+                # Model format: mnemonic + name, bits as objects with name/description.
                 reg_name = info.get("mnemonic", "")
                 reg_desc = info.get("name", "")
                 bits = info.get("bits", {})
@@ -1126,9 +1126,9 @@ class BridgeGUI:
                 name_text = f"{reg_name}" if reg_name else reg_desc[:20]
                 ttk.Label(row, text=name_text, width=30).pack(side=tk.LEFT)
 
-                # Register mit Errata-Eintrag werden markiert. Ohne die Marke sieht ein
-                # Register, dessen Wert laut Errata nicht bedeutet, was dransteht, genauso
-                # aus wie jedes andere -- das ist die Irrefuehrung, um die es hier geht.
+                # Registers with an errata entry are flagged. Without the flag, a
+                # register whose value, per the errata, doesn't mean what it says would look
+                # exactly like any other -- that is the misleading situation this addresses.
                 if errata:
                     items = ", ".join(e.get("item", "?") for e in errata)
                     ttk.Label(row, text=f"⚠ {items}", foreground="#b00",
@@ -1162,10 +1162,10 @@ class BridgeGUI:
                                       font=("Courier", 8), foreground="#b00",
                                       wraplength=900, justify=tk.LEFT).pack(anchor=tk.W)
 
-                    # Bitfield definitions. Der ausgelesene Wert steht am Ende DERSELBEN
-                    # Zeile statt in einer Sammelzeile darunter: das spart je Register eine
-                    # Zeile und erspart das Zurueckspringen zwischen Feldname und Wert.
-                    # Zwei Labels nebeneinander, weil ein ttk.Label nur eine Farbe kann.
+                    # Bitfield definitions. The read-out value sits at the end of the SAME
+                    # line instead of in a combined line below: that saves one line per register
+                    # and avoids jumping back and forth between field name and value.
+                    # Two labels side by side, because a ttk.Label can only have one color.
                     field_vars: Dict[str, tk.StringVar] = {}
                     for bits, meaning in bitfields.items():
                         bf_row = ttk.Frame(sep_row)
@@ -1177,9 +1177,9 @@ class BridgeGUI:
                         ttk.Label(bf_row, textvariable=fv, font=("Courier", 8),
                                   foreground="#009900").pack(side=tk.LEFT)
 
-                    # Ein Callback je Register aktualisiert alle seine Felder. Die
-                    # Default-Argumente sind Pflicht: ohne sie zeigen alle Callbacks nach
-                    # der Schleife auf die zuletzt erzeugten Variablen.
+                    # One callback per register updates all its fields. The
+                    # default arguments are mandatory: without them, all callbacks would point
+                    # after the loop to the last-created variables.
                     def make_update_decoded(val_var=value_var, fvars=field_vars):
                         def update_decoded(*args):
                             hex_val = val_var.get()
@@ -1189,7 +1189,7 @@ class BridgeGUI:
 
                     callback = make_update_decoded()
                     value_var.trace_add("write", callback)
-                    callback()   # gespeicherte Werte gleich beim Aufbau zeigen
+                    callback()   # show saved values right away while building
 
             canvas.pack(side="left", fill="both", expand=True)
             scrollbar.pack(side="right", fill="y")
@@ -1197,7 +1197,7 @@ class BridgeGUI:
         # The bulk buttons that used to sit here are in the top bar now (create_widgets),
         # where they stay visible no matter which tab is open or how far it is scrolled.
 
-    # (mode, title, description) - description is the "ausführlich erklärt" text shown
+    # (mode, title, description) - description is the "explained in detail" text shown
     # in that mode's own group. Kept here as data, not spread across widget calls, so a
     # fifth mode is one more tuple. Longer background (setup notes, safety) stays in
     # docs/LAN8651_TEST_MODES.md; this is the summary worth having next to the button.
@@ -1229,10 +1229,10 @@ class BridgeGUI:
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Test Modes")
 
-        # Scrollable wie die anderen inhaltsschweren Tabs (Bridge Parameters, Registers) -
-        # fuenf Gruppen mit Beschreibung passen nicht auf jeden Bildschirm. Siehe
-        # _register_wheel_canvas fuer den globalen Mausrad-Handler und
-        # _bind_page_scroll_keys fuer den Bild-hoch/-runter-Fallback (Touchpad).
+        # Scrollable like the other content-heavy tabs (Bridge Parameters, Registers) -
+        # five groups with a description don't fit on every screen. See
+        # _register_wheel_canvas for the global mouse wheel handler and
+        # _bind_page_scroll_keys for the page up/down fallback (touchpad).
         canvas = tk.Canvas(frame)
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
@@ -1250,12 +1250,12 @@ class BridgeGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Zwei Spalten statt einer langen Kette von fuenf Gruppen - Mode 0 ueber die volle
-        # Breite, Mode 1-4 im 2x2-Raster darunter. Nutzt die Breite, die ein maximiertes
-        # Fenster tatsaechlich hat, statt sie ungenutzt zu lassen, und braucht dadurch nur
-        # drei Zeilen statt fuenf: passt auf jeden vernuenftig grossen Bildschirm, ohne zu
-        # scrollen. Alle Kinder von scrollable_frame muessen deshalb konsequent grid() statt
-        # pack() verwenden - Tk erlaubt beides nicht gemischt im selben Container.
+        # Two columns instead of one long chain of five groups - Mode 0 spans the full
+        # width, Mode 1-4 in a 2x2 grid below it. Uses the width a maximized
+        # window actually has instead of leaving it unused, and thereby needs only
+        # three rows instead of five: fits on any reasonably sized screen without
+        # scrolling. All children of scrollable_frame must therefore consistently use grid() instead of
+        # pack() - Tk does not allow mixing both in the same container.
         scrollable_frame.columnconfigure(0, weight=1, uniform="testmode_col")
         scrollable_frame.columnconfigure(1, weight=1, uniform="testmode_col")
 
@@ -1266,8 +1266,8 @@ class BridgeGUI:
             justify=tk.LEFT, foreground="red"
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=8)
 
-        # Mode 0: immer zuerst erreichbar, unabhaengig davon, welcher Testmodus gerade
-        # laeuft - kein Auto-Revert-Feld, "Normalbetrieb" hat keine Dauer.
+        # Mode 0: always reachable first, regardless of which test mode is currently
+        # running - no auto-revert field, "normal operation" has no duration.
         normal_frame = ttk.LabelFrame(scrollable_frame, text="Mode 0 - Normal Operation", padding=10)
         normal_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
         ttk.Label(normal_frame, text="Ends any active test mode and restores normal T1S operation.",
@@ -1279,16 +1279,16 @@ class BridgeGUI:
         ttk.Button(row0, text="Read Current Mode",
                    command=self.read_testmode, width=22).pack(side=tk.LEFT, padx=2)
 
-        # Je Testmodus ein eigenes StringVar fuers Auto-Revert-Feld, damit apply_testmode
-        # weiss, welches Feld zu welchem "Start"-Knopf gehoert.
+        # A separate StringVar per test mode for the auto-revert field, so apply_testmode
+        # knows which field belongs to which "Start" button.
         self.testmode_timeout_vars: Dict[int, tk.StringVar] = {}
         for i, (mode, title, description) in enumerate(self.TEST_MODES):
             grp_row, grp_col = divmod(i, 2)
             grp = ttk.LabelFrame(scrollable_frame, text=f"Mode {mode} - {title}", padding=10)
             grp.grid(row=2 + grp_row, column=grp_col, sticky="nsew", padx=8, pady=5)
 
-            # wraplength haelt die Beschreibung in der jetzt halb so breiten Spalte lesbar,
-            # statt die Spalte auf die Laenge der laengsten Zeile aufzuziehen.
+            # wraplength keeps the description readable in the now half-as-wide column,
+            # instead of stretching the column to the length of the longest line.
             ttk.Label(grp, text=description, justify=tk.LEFT, wraplength=600).pack(anchor=tk.W)
 
             ctrl = ttk.Frame(grp)
@@ -1652,7 +1652,7 @@ Example commands:
         self.set_status("Disconnected")
 
     def run_async_cmd(self, command: str, timeout_ms: int = 1500):
-        """Kommando über den offenen Link absetzen, Antwort ins Command Output."""
+        """Send a command over the open link, response goes into Command Output."""
         if not self.port_link:
             self.set_error_status("Not connected")
             messagebox.showwarning("Not connected",
@@ -1739,7 +1739,7 @@ Example commands:
     def _list_probes(self) -> List[tuple]:
         """Probes per pyOCD, via 'flash_same54.py --list' rather than importing pyocd
         directly here - pyocd stays a dependency of the flash tool, not this GUI (see
-        the module docstring: "Standalone. Gebraucht werden nur pyserial"). Output is
+        the module docstring: "Standalone apart from pyserial"). Output is
         one line per probe: '<unique_id>  <vendor> <product>' (flash_same54.py's own
         list_probes())."""
         try:
@@ -1899,7 +1899,7 @@ Example commands:
 
     @staticmethod
     def clean_response(command: str, output: str) -> str:
-        """Echo des Kommandos und Prompt-Zeichen aus der Antwort entfernen."""
+        """Remove the command echo and prompt characters from the response."""
         lines = []
         for raw in output.replace("\r", "\n").split("\n"):
             line = raw.strip().lstrip(">").strip()
@@ -1920,9 +1920,9 @@ Example commands:
             while True:
                 result = self.result_queue.get_nowait()
 
-                # Serielle Daten gehen an BEIDE Konsumenten: ans Terminal zur
-                # Anzeige und - nur solange ein Kommando läuft - an den Worker.
-                # Zwei Queues, je eine Kopie, deshalb kein Wettlauf um die Chunks.
+                # Serial data goes to BOTH consumers: to the terminal for
+                # display, and - only while a command is running - to the worker.
+                # Two queues, one copy each, so there's no race for the chunks.
                 if len(result) >= 3 and result[1] == "data":
                     self.terminal_q.put(result)
                     if self.cmd_pending.is_set():
@@ -2013,14 +2013,14 @@ Example commands:
                         self.set_error_status(f"Failed to read {key}")
 
                 elif result[0] == "env_identity":
-                    # Kennung des EEPROM-Datensatzes. Meldet das Geraet etwas, wofuer es
-                    # kein Modell gibt, sagt die Zeile das ausdruecklich -- und rot, denn
-                    # dann sind die Werte darunter nicht gedeutet.
+                    # Identity of the EEPROM record. If the device reports something for which
+                    # there is no model, the line states this explicitly -- and in red, because
+                    # then the values below are not interpreted.
                     self.env_identity = result[1]
                     if self.env_identity is None:
-                        # Gefragt wurde, nur kam keine Kennung zurueck. Das ist etwas
-                        # anderes als "noch nicht gefragt" und muss auch so dastehen,
-                        # sonst haelt man eine alte Firmware fuer eine ungelesene.
+                        # It was asked for, but no identity came back. That is something
+                        # different from "not asked yet" and must be shown as such,
+                        # otherwise an old firmware looks like an unread one.
                         self.env_identity_var.set(
                             "Environment: the device reported no id - this firmware "
                             "predates the identity line in showenv. The values below are read "
@@ -2028,10 +2028,10 @@ Example commands:
                         self.env_identity_label_color(False)
                     else:
                         self.env_identity_var.set(self.env_identity_line())
-                        # Rot heisst "den Werten unten ist nicht zu trauen", nicht "die
-                        # Kennung ist neu". Eine Alt-Kennung, die die Firmware annimmt,
-                        # ist eine Information -- faerbte man sie rot, gewoehnte man sich
-                        # an eine rote Zeile, und die echte Warnung ginge darin unter.
+                        # Red means "the values below can't be trusted", not "the
+                        # identity is new". A legacy identity that the firmware accepts
+                        # is just information -- coloring it red would make people used
+                        # to a red line, and the real warning would get lost in it.
                         usable = bool(self.env_entry()) and \
                             self.env_identity.get("eeprom_crc", "").lower() == "ok"
                         self.env_identity_label_color(usable)
@@ -2047,10 +2047,10 @@ Example commands:
 
     # Register read/write via open Link (not cli.py)
     def decode_one_bitfield(self, value_hex: str, bits_range: str) -> str:
-        """Den Wert EINES Bitfelds als Anhaengsel fuer dessen eigene Zeile.
+        """The value of ONE bitfield, as an appendix for its own line.
 
-        Leerer String, wenn nichts gelesen wurde oder der Wert unlesbar ist - dann steht
-        in der Zeile nur die Beschreibung, und niemand haelt eine 0 fuer eine Messung.
+        Empty string if nothing was read or the value is unreadable - then
+        the line shows only the description, and nobody mistakes a 0 for a measurement.
         """
         if not value_hex or not value_hex.strip():
             return ""
@@ -2073,18 +2073,18 @@ Example commands:
         return f"  = {field_value} (0x{field_value:X})"
 
     def send_command_via_link(self, cmd: str, timeout_ms: int = 700) -> str:
-        """Kommando über den offenen Link schicken und auf die Antwort warten.
+        """Send a command over the open link and wait for the response.
 
-        Läuft im Worker-Thread. Die Antwort kommt über cmd_response_q, die nur
-        gefüllt wird, solange cmd_pending gesetzt ist -- damit liest der Terminal-
-        Konsument im Main-Thread nicht dieselben Chunks weg.
+        Runs in the worker thread. The response arrives via cmd_response_q, which is
+        only filled while cmd_pending is set -- so the terminal
+        consumer in the main thread doesn't read away the same chunks.
         """
         if not self.port_link:
             return "ERROR: Not connected"
 
-        # Nur ein Kommando gleichzeitig, sonst mischen sich zwei Antworten.
+        # Only one command at a time, otherwise two responses would get mixed up.
         with self.cmd_lock:
-            # Altbestand verwerfen, sonst landet die Antwort des Vorgängers hier.
+            # Discard old leftovers, otherwise the previous command's response ends up here.
             while True:
                 try:
                     self.cmd_response_q.get_nowait()
@@ -2103,8 +2103,8 @@ Example commands:
                     try:
                         port, kind, payload = self.cmd_response_q.get(timeout=0.01)
                     except queue.Empty:
-                        # Erst abbrechen, wenn schon etwas da war -- sonst wartet
-                        # der erste Durchlauf gar nicht auf das Gerät.
+                        # Only give up once something has already arrived -- otherwise
+                        # the first pass wouldn't wait for the device at all.
                         idle += 1
                         if chunks and idle > 4:
                             break
@@ -2115,8 +2115,8 @@ Example commands:
                     chunks.append(payload.decode("latin-1", "ignore"))
                     idle = 0
                     text = "".join(chunks)
-                    # Fertig, sobald der Marker da ist UND die Zeile abgeschlossen
-                    # wurde -- ein "OK:" ohne Zeilenende ist erst der Anfang.
+                    # Done as soon as the marker is present AND the line has been
+                    # completed -- an "OK:" without a line ending is only the beginning.
                     for marker in ("OK:", "ERROR"):
                         pos = text.find(marker)
                         if pos >= 0 and "\n" in text[pos:]:
@@ -2128,7 +2128,7 @@ Example commands:
 
     # Bridge parameter methods
     def read_all_bridge(self):
-        """Alle Bridge-Parameter mit einem showenv holen."""
+        """Fetch all bridge parameters with a single showenv."""
         if not self.port_link:
             self.set_error_status("Not connected")
             messagebox.showwarning("Not connected", "Press Connect first.")
@@ -2138,9 +2138,9 @@ Example commands:
 
         def worker():
             output = self.send_command_via_link("showenv", timeout_ms=1500)
-            # Erst die Kennung, und die Werte werden mit GENAU diesem Eintrag gedeutet.
-            # Sonst zeigt die GUI gefuellte Felder unter einer Zeile, die sagt, das
-            # Environment sei unbekannt -- beides aus derselben Antwort, und widerspruechlich.
+            # Identity first, and the values are interpreted using EXACTLY this entry.
+            # Otherwise the GUI would show filled fields under a line saying the
+            # environment is unknown -- both from the same response, and contradictory.
             ident = self.parse_env_identity(output)
             entry = self.env_entry_for(ident)
             self.result_queue.put(("env_identity", ident))
@@ -2157,18 +2157,18 @@ Example commands:
         threading.Thread(target=worker, daemon=True).start()
 
     def write_environment(self):
-        """Das ganze Environment schreiben: jedes gefuellte Feld, dann ins EEPROM.
+        """Write the whole environment: every filled field, then into the EEPROM.
 
-        Zwei Sicherungen, die beide begruendet sind:
+        Two safeguards, both justified:
 
-        Die Kennung wird vorher geprueft. Meldet das Geraet ein Environment, fuer das es
-        hier kein Modell gibt, waeren die setenv-Schluessel geraten - dann wird nicht
-        geschrieben. Wurde die Kennung noch gar nicht gelesen, holt diese Funktion sie
-        selbst nach, statt anzunehmen, es werde schon passen.
+        The identity is checked beforehand. If the device reports an environment for which
+        there is no model here, the setenv keys would be guesswork - so nothing gets
+        written. If the identity hasn't been read yet at all, this function fetches it
+        itself instead of assuming it will fit.
 
-        Und 'saveenv' ist die Vorgabe, nicht die Rueckfrage: wer "Write Environment"
-        drueckt, will etwas, das den Reset uebersteht. Wer nur die RAM-Kopie aendern will,
-        nimmt den Write-Knopf am einzelnen Feld.
+        And 'saveenv' is the default, not a follow-up question: whoever presses "Write Environment"
+        wants something that survives the reset. Whoever only wants to change the RAM copy
+        uses the Write button on the individual field.
         """
         if not self.port_link:
             self.set_error_status("Not connected")
@@ -2219,8 +2219,8 @@ Example commands:
                 log.append(f"> {cmd}\n{self.clean_response(cmd, out)}")
             out = self.send_command_via_link(persist_cmd, timeout_ms=3000)
             log.append(f"> {persist_cmd}\n{self.clean_response(persist_cmd, out)}")
-            # Danach zurueckhalen, was wirklich drinsteht - eine Schreibbestaetigung ist
-            # kein Beleg dafuer, dass das Geraet den Wert auch angenommen hat.
+            # Afterwards, read back what is actually stored - a write confirmation is
+            # no proof that the device actually accepted the value.
             check = self.send_command_via_link("showenv", timeout_ms=1500)
             self.result_queue.put(("env_identity", self.parse_env_identity(check)))
             for key in self.bridge_fields:
@@ -2233,11 +2233,11 @@ Example commands:
         self.set_status("Writing environment...")
 
     def bridge_write_command(self, key: str, value: str) -> Optional[str]:
-        """Feldname -> CLI-Kommando, beides aus dem Modell.
+        """Field name -> CLI command, both from the model.
 
-        Weder der Schluessel noch die Kommandoform stehen noch im Quelltext: 'commands.
-        write_field' und 'cli_key' kommen aus env_model.json, damit eine andere Firmware-
-        Variante nur eine andere Modelldatei braucht und keinen Patch hier.
+        Neither the key nor the command form are in the source code anymore: 'commands.
+        write_field' and 'cli_key' come from env_model.json, so a different firmware
+        variant only needs a different model file and no patch here.
         """
         env = self.env_entry()
         fld = env.get("fields", {}).get(key)
@@ -2247,14 +2247,14 @@ Example commands:
         return template.format(cli_key=fld["cli_key"], value=value)
 
     def parse_showenv(self, output: str, key: str, entry: Optional[dict] = None) -> Optional[str]:
-        """Einen Wert aus der showenv-Ausgabe ziehen -- mit dem Muster aus dem Modell.
+        """Pull one value from the showenv output -- using the pattern from the model.
 
-        'entry' erlaubt es, den Modelleintrag mitzugeben, statt den aktuellen der GUI zu
-        nehmen: der Worker hat die Kennung aus derselben Ausgabe schon aufgeloest.
+        'entry' allows passing in the model entry instead of using the GUI's
+        current one: the worker has already resolved the identity from the same output.
 
-        'reads_as' bildet die Anzeige des Geraets auf den Wert ab, den setenv erwartet
-        (mirror meldet ON/OFF, geschrieben wird 1/0). Ohne das steht in der GUI ein Wort,
-        das man nicht zurueckschreiben kann.
+        'reads_as' maps the device's display onto the value setenv expects
+        (mirror reports ON/OFF, but 1/0 is written). Without that, the GUI would show a word
+        that can't be written back.
         """
         env = self.env_entry() if entry is None else entry
         fld = env.get("fields", {}).get(key)
@@ -2359,7 +2359,7 @@ Example commands:
         self.set_status(f"Writing {addr} = {value}...")
 
     def bulk_read_registers(self):
-        """Alle Register des aktuellen Tabs lesen."""
+        """Read all registers of the current tab."""
         addrs = list(self.register_fields.keys())
         self.set_status(f"Reading {len(addrs)} registers...")
 
@@ -2433,13 +2433,13 @@ Example commands:
         thread.start()
 
     def save_registers_json(self):
-        """Nur die gelesenen WERTE speichern. Das Modell kann die GUI nicht mehr anfassen.
+        """Save only the VALUES that were read. The GUI can no longer touch the model.
 
-        Frueher schrieb diese Funktion die ganze Registerkarte zurueck und hat sie dabei
-        zweimal beschaedigt: einmal, weil sie sie aus den Widgets neu aufbaute (alles ohne
-        Widget fiel raus), einmal ueber die Kodierung. Seit die Karte in lan8651_model.json
-        liegt und hier nur {Adresse: Wert} landet, ist diese Fehlerklasse konstruktiv weg --
-        eine Funktion, die eine Datei nicht schreibt, kann sie nicht kaputtmachen.
+        This function used to write the whole register map back and in doing so
+        damaged it twice: once because it rebuilt it from the widgets (anything without a
+        widget fell out), once via the encoding. Since the map lives in lan8651_model.json
+        and only {address: value} ends up here, this class of bug is structurally gone --
+        a function that doesn't write a file can't corrupt it.
         """
         if not self.register_fields:
             messagebox.showwarning("Warning", "No register model loaded - nothing saved.")
@@ -2447,14 +2447,14 @@ Example commands:
 
         values = {addr: var.get() for addr, var in self.register_fields.items() if var.get()}
         self.config["values"] = values
-        self.config.pop("registers", None)  # Altlast aus der Zeit, als die Karte hier stand
+        self.config.pop("registers", None)  # leftover from when the map used to live here
         self.save_config()
 
         self.set_status(f"{len(values)} register values saved "
                         f"(model untouched)", duration=3000)
 
     def load_registers_json(self):
-        """Gespeicherte Registerwerte zurueck in die Felder holen."""
+        """Load saved register values back into the fields."""
         if not CONFIG_FILE.exists():
             messagebox.showwarning("Warning", "Config file not found")
             return
@@ -2466,7 +2466,7 @@ Example commands:
                 self.register_fields[addr].set(str(val))
                 n += 1
 
-        # Aeltere bridge_config.json trugen die Werte noch im "registers"-Baum.
+        # Older bridge_config.json files still carried the values in the "registers" tree.
         for key, value in (cfg.get("registers") or {}).items():
             if isinstance(value, dict):
                 for addr, entry in value.items():

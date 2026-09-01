@@ -1546,7 +1546,7 @@ completed step — do not wait until the end of the session.
 
 ### Ported `gui_term.py` (three-pane serial terminal) from the sister project
 
-- Follow-up to the `bridge_gui.py` port: "und jetzt das term" - `gui_term.py` is a
+- Follow-up to the `bridge_gui.py` port: "and now the term[inal]" - `gui_term.py` is a
   separate standalone tool (three serial consoles in one window, one click
   connects all), not the inlined single-port Terminal tab already inside
   `bridge_gui.py`. `dep_check.py`'s own docstring already called it out as "the
@@ -1625,8 +1625,8 @@ completed step — do not wait until the end of the session.
 - Re-added the TEMP DIAG instrumentation (`g_tc6DiagEnable`, wiped by the MCC
   Force-Update-on-All regenerate a few steps earlier - restored verbatim from
   commit `8972180`'s diff via `git show`) to `tc6.c`/`drv_lan865x_api.c`, then
-  built+flashed+tested this investigation directly (user: "bau du, und flash und
-  teste es genau so wie ich es gemacht habe").
+  built+flashed+tested this investigation directly (user: "you build it, and flash and
+  test it exactly the way I did it").
   - First attempt: tracing every chunk during a real full-rate iperf run flooded
     the 115200-baud console faster than it could drain, corrupting the trace into
     garbled interleaved fragments. Fixed by gating the chunk-level trace to only
@@ -2250,8 +2250,8 @@ completed step — do not wait until the end of the session.
   in the low thousands on both ports).
 - **Correction, same session:** the "Follower B's own outbound TCP/ICMP
   corruption bug" noted above as still-open was wrong and has been
-  retracted. User pushed back ("ich glaube nicht, dass das der Follower
-  ist") and asked for a decisive test: flash the sister project's own
+  retracted. User pushed back ("I don't think that's the Follower")
+  and asked for a decisive test: flash the sister project's own
   bridge firmware (`t1s_100baset_bridge/release/T1S_100BaseT_Bridge.hex`,
   built for a LAN8740A PHY - this board has a LAN8742A, but the link still
   came up and both interfaces reported Ready) onto this board and retest
