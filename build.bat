@@ -15,6 +15,11 @@ setlocal EnableDelayedExpansion
 :: ===========================================================================
 
 set "SCRIPT_DIR=%~dp0"
+rem Runs build_summary.py through this project's own .venv (created by
+rem setup.bat / batch\setup_venv.bat), falling back to the bare "python" from
+rem PATH if .venv doesn't exist yet - same pattern as flash.bat/cli.bat.
+set "PY=%SCRIPT_DIR%.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=python"
 set "MPLAB_DIR=%SCRIPT_DIR%firmware\tcpip_iperf_lan865x.X"
 set "PROJ_NAME=tcpip_iperf_lan865x"
 set "CONF=default"
@@ -22,6 +27,7 @@ set "TYPE_IMAGE=PRODUCTION"
 set "DIST_DIR=%MPLAB_DIR%\dist\%CONF%\production"
 set "ELF_PATH=%DIST_DIR%\%PROJ_NAME%.X.production.elf"
 set "HEX_PATH=%DIST_DIR%\%PROJ_NAME%.X.production.hex"
+set "COMPILER_CONFIG=%SCRIPT_DIR%setup_compiler.config"
 set "MPLABX_MAKE="
 for /f "delims=" %%D in ('dir /b /ad /o-n "C:\Program Files\Microchip\MPLABX\v*" 2^>nul') do (
     if not defined MPLABX_MAKE if exist "C:\Program Files\Microchip\MPLABX\%%D\gnuBins\GnuWin32\bin\make.exe" (
@@ -50,6 +56,14 @@ rem line - nbproject\Makefile-local-default.mk (written by MPLAB X itself)
 rem already has the correct absolute compiler path. A command-line override -
 rem even blank - takes precedence and silently breaks xc32-bin2hex (link
 rem succeeds, then "file not found").
+rem setup_compiler.config is only used here for build_summary.py's xc32-nm.
+if exist "%COMPILER_CONFIG%" (
+    for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "(Get-Content '%COMPILER_CONFIG%' | ConvertFrom-Json).bin_dir"`) do set "XC32_BIN_DIR=%%D"
+    if defined XC32_BIN_DIR echo Compiler  : %XC32_BIN_DIR%
+) else (
+    echo WARNING: No compiler configured ^(run "python scripts\setup_compiler.py"^).
+    echo          build_summary.py's interrupt-handler listing will be empty.
+)
 
 set "MODE=incremental"
 if not "%~1"=="" set "MODE=%~1"
@@ -107,4 +121,7 @@ if exist "%HEX_PATH%" (
 ) else (
     echo WARNING: expected HEX not found at %HEX_PATH%
 )
+
+rem Post-build memory / interrupt summary (flash/RAM, heap, IRQ handlers).
+if exist "%ELF_PATH%" "%PY%" "%SCRIPT_DIR%scripts\build_summary.py" "%DIST_DIR%" "%ELF_PATH%" "%XC32_BIN_DIR%"
 endlocal

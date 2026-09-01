@@ -130,6 +130,16 @@ cli.bat --port COM8 --read 3 "reset"
   **`flash.bat` flasht standardmäßig genau diese `release\`-Datei** (seit 2026-08-31, vorher
   `dist\`) — um stattdessen einen frischen lokalen Build zu flashen, den `dist\`-Pfad explizit
   angeben: `flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex`.
+- **`scripts\build_summary.py` (seit 2026-09-01, 1:1 vom Schwesterprojekt portiert)**
+  läuft automatisch am Ende jedes `build.bat`-Laufs: Flash-/RAM-Belegung aus
+  `memoryfile.xml`, Heap-/Stack-Größe aus dem `.map` (Heap gefunden, `_min_stack_size`
+  in diesem Projekt **nicht** im `.map` vorhanden — Skript zeigt dafür sauber
+  „-- not found in map --", kein Bug), aktive Interrupt-Handler über `xc32-nm`
+  (bleibt leer, solange `setup_compiler.config` nicht existiert — einmalig
+  `python scripts\setup_compiler.py` laufen lassen, exakt dieselbe Abhängigkeit wie
+  im Schwesterprojekt). Archiviert zusätzlich HEX + Summary-Text zeitgestempelt unter
+  `firmware\tcpip_iperf_lan865x.X\dist\default\production\image\` (gitignored, wie
+  der ganze `dist\`-Baum).
 - **Aus Git Bash `.bat`-Dateien mit absolutem Pfad aufrufen** (sonst „not recognized"):
   `MSYS_NO_PATHCONV=1 cmd /c "C:\work\t1s_bridge\bridge\harmony\net_10base_t1s\apps\tcpip_iperf_lan865x\flash.bat --list" < /dev/null`.
 - **CLI-Antworten sind asynchron** — nach einem Kommando auf die Antwortzeile warten

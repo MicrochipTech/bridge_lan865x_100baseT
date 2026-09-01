@@ -169,6 +169,10 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
   captures on the PC, and checks the capture for completeness/truncation.
 - `patches\apply_patches.py` — reapplies this project's hand-patches to
   MCC-generated code after a `Generate Code` run; see [§5.5](#55-after-editing-in-mcc-reapplying-hand-patches).
+- `scripts\build_summary.py` — runs automatically after every `build.bat`:
+  prints flash/RAM usage, heap/stack size, and active interrupt handlers,
+  then archives a timestamped copy of the HEX plus this summary under
+  `dist\...\image\`.
 
 ---
 

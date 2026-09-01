@@ -2352,4 +2352,55 @@ completed step — do not wait until the end of the session.
 
 ---
 
+### `build_summary.py` ported from the sister project
+
+- Last remaining piece of the sister project's build tooling not yet
+  mirrored here (`setup_compiler.py`/`.config` had already been ported
+  earlier). Copied `scripts\build_summary.py` unchanged apart from the
+  output image filename prefix (`bridge_lan865x_100baseT_<ts>.hex` instead
+  of `T1S_100BaseT_Bridge_<ts>.hex`), and wired it into `build.bat` exactly
+  as in the sister: a `COMPILER_CONFIG`/`XC32_BIN_DIR` read (feeds
+  `build_summary.py`'s `xc32-nm` call, still not used by the actual build
+  itself) plus the `PY .venv` fallback pattern already used by
+  `flash.bat`/`cli.bat`, then a call to the script right after the
+  `release\` copy step.
+- Verified with a real build: prints flash (18.8% used), RAM (18.1% used),
+  heap size (found, 160 KiB) correctly. Two gaps, both expected/benign, not
+  bugs in the port:
+  - **Stack size not found** - this project's `.map` file has no
+    `_min_stack_size` symbol at all (checked directly, not just a regex
+    miss) - the script already handles a missing value gracefully, same
+    as it would for heap.
+  - **Interrupt handler list empty** - `setup_compiler.config` doesn't
+    exist on this machine yet (never run `scripts\setup_compiler.py` here),
+    so `XC32_BIN_DIR` is unset and `xc32-nm` never runs - identical,
+    already-documented dependency in the sister project.
+- Archived output confirmed: `dist\...\image\bridge_lan865x_100baseT_<ts>.hex`
+  + `build_summary_<ts>.txt`, under the already-gitignored `**/*.X/dist`
+  tree - no new `.gitignore` entry needed.
+- Created `setup_compiler.config` (advisory, machine-specific, gitignored)
+  pointing at the XC32 v5.10 that actually built this image - the
+  interrupt-handler section was empty until this existed, exactly as
+  documented; with it, `xc32-nm` runs and shows the real set (7 core, 6
+  peripheral: DMAC_0/1, GMAC, SERCOM0_SPI, SERCOM1_USART, TC0_Timer) -
+  identical shape to the sister project's own already-committed sample
+  summary, confirming the port works, not just that it doesn't crash.
+- **Real gap found and fixed, not a porting bug:** the "RAM (data memory)"
+  figure (`memoryfile.xml`'s `used`/`total`, the same number the MPLAB X IDE
+  gauge shows) only ever covers `.data`+`.bss` - it never included the heap
+  reservation carved out of the same RAM by `_min_heap_size`, making the
+  printed percentage badly misleading (18.1% "used" while the heap alone
+  reserves another 62.5% of total RAM that never shows up anywhere in the
+  original report). Added a second, combined section, "RAM committed
+  (.data + .bss + heap)": 211,243 / 262,144 bytes = **80.6%** actually
+  committed - the number that matters for judging how much headroom is
+  really left. Left the original `.data`+`.bss`-only section in place too
+  (relabeled to say what it covers), rather than replacing it, since it's
+  still the number that matches the IDE's own gauge for cross-checking.
+  This gap exists identically in the sister project's own copy of
+  `build_summary.py` (unfixed there) - not yet ported back, ask before
+  doing so if wanted.
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->
