@@ -8,7 +8,9 @@ finding this tool works around: pyOCD's public pack index only offers an outdate
 third-party "Keil.SAME54_DFP" 1.0.4 mirror, which is missing RAM/flash-region metadata
 and fails with "CMSIS-Pack device ATSAME54P20A has no default RAM defined". The real,
 current Microchip.SAME54_DFP pack (as installed locally by MPLAB X / MCC) works fine,
-so this tool finds it automatically and feeds it to pyOCD via --pack.
+so this tool finds it automatically and feeds it to pyOCD via --pack. If none is found
+locally, it downloads the pinned version directly from Microchip's public pack server
+(see download_pack()) - confirmed reachable without auth or redirect, no MPLAB X needed.
 """
 
 import argparse
@@ -17,12 +19,26 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
 DEFAULT_TARGET = "atsame54p20a"
 PACK_CACHE = Path.home() / ".mchp_packs" / "Microchip" / "SAME54_DFP"
 MPLABX_ROOT = Path("C:/Program Files/Microchip/MPLABX")
+
+# Fallback when no pack is installed locally (no MPLAB X / MCC on this machine): the exact
+# version this project already uses when one *is* found locally, downloaded straight from
+# Microchip's pack server. This is the same file MPLAB X's own Pack Manager fetches - verified
+# 2026-09-01 to be a plain, unauthenticated, non-redirecting download (a real CMSIS .pack zip,
+# not the outdated third-party pyOCD index mirror mentioned above).
+SAME54_DFP_VERSION = "3.11.261"
+SAME54_DFP_URL = f"https://packs.download.microchip.com/Microchip.SAME54_DFP.{SAME54_DFP_VERSION}.atpack"
+# Deliberately outside PACK_CACHE's own tree: find_pack_dir() below treats every subdirectory
+# of PACK_CACHE as an unpacked-pack candidate (looks for a *.pdsc inside it) - a directory that
+# instead holds one already-zipped .pack file would break that scan.
+DOWNLOADED_PACK_DIR = Path.home() / ".mchp_packs" / "downloaded"
 # bench.json is a per-machine, gitignored file that lives in json/ (repo root),
 # not next to this script.
 BENCH_PATH = Path(__file__).parent.parent / "json" / "bench.json"
@@ -68,13 +84,43 @@ def ensure_pack_file(pack_path: Path) -> Path:
     return out
 
 
-def resolve_pack(explicit):
+def download_pack(version=SAME54_DFP_VERSION, quiet=False):
+    """Download the pinned Microchip.SAME54_DFP pack from Microchip's public pack server and
+    cache it under DOWNLOADED_PACK_DIR. Returns the cached .pack path; raises RuntimeError on
+    any network failure (caller decides whether that's fatal)."""
+    out = DOWNLOADED_PACK_DIR / f"Microchip.SAME54_DFP.{version}.pack"
+    if out.is_file():
+        return out
+    url = f"https://packs.download.microchip.com/Microchip.SAME54_DFP.{version}.atpack"
+    if not quiet:
+        print(f"No local Microchip.SAME54_DFP pack found - downloading {url} ...")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".pack.tmp")
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            tmp.write_bytes(resp.read())
+    except (OSError, urllib.error.URLError) as exc:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"could not download {url}: {exc}") from exc
+    os.replace(tmp, out)
+    if not quiet:
+        print(f"OK: pack downloaded and cached at {out}")
+    return out
+
+
+def resolve_pack(explicit, allow_download=True):
     if explicit:
         return ensure_pack_file(Path(explicit))
     pack_dir = find_pack_dir()
-    if pack_dir is None:
+    if pack_dir is not None:
+        return ensure_pack_file(pack_dir)
+    if not allow_download:
         return None
-    return ensure_pack_file(pack_dir)
+    try:
+        return download_pack()
+    except RuntimeError as exc:
+        print(f"Warning: {exc}", file=sys.stderr)
+        return None
 
 
 def load_bench():
@@ -221,11 +267,12 @@ def main():
     pack = resolve_pack(args.pack)
     if pack is None:
         print(
-            "Warning: no Microchip.SAME54_DFP pack found locally and none given via --pack.\n"
+            "Warning: no Microchip.SAME54_DFP pack found locally, none given via --pack, and\n"
+            "         the automatic download also failed (see above - likely no network).\n"
             "         Falling back to pyOCD's built-in pack index, which as of pyOCD 0.43.0\n"
             "         only has an outdated Keil.SAME54_DFP (1.0.4) mirror that is known to\n"
-            "         fail flashing ('no default RAM defined'). Install MPLAB X / MCC, or\n"
-            "         pass --pack explicitly.",
+            "         fail flashing ('no default RAM defined'). Retry once online, or pass\n"
+            "         --pack explicitly.",
             file=sys.stderr,
         )
     else:

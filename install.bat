@@ -3,13 +3,14 @@ rem ===========================================================================
 rem  install.bat - check and set up the prerequisites for flash.bat
 rem
 rem  Usage:   install.bat            ... check prerequisites, then pick the probe
-rem           install.bat --install  ... same, plus install missing pyOCD via pip
+rem           install.bat --install  ... same, plus install missing pyOCD via pip and
+rem                                      download the SAME54_DFP pack if missing
 rem           install.bat --select   ... only pick the probe, skip the checks
 rem
-rem  Checked: Python >= 3.9, pyOCD (verified with 0.43.0), visible EDBG probes
-rem  on USB, and a locally present Microchip.SAME54_DFP pack. The pack itself
-rem  is deliberately NOT loaded automatically - there is no official direct
-rem  URL for it; it comes from an MPLAB X / MCC installation.
+rem  Checked: Python >= 3.9, pyOCD (verified with 0.43.0), visible EDBG probes on
+rem  USB, and a locally present Microchip.SAME54_DFP pack - if MPLAB X / MCC never
+rem  installed one locally, --install downloads the pinned version directly from
+rem  Microchip's public pack server (no MPLAB X needed at all).
 rem
 rem  Probe selection: EVERY run lists the connected probes with a number and asks
 rem  which one flash.bat should program - on a bench with several boards, which

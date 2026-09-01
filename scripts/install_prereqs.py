@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Installer/preflight check for everything flash_same54.py needs.
 
-Automatically installs whatever can be safely automated (pyocd via pip).
-Also checks USB probe visibility and the local Microchip.SAME54_DFP pack,
-printing clear, concrete next steps for anything missing -- a pack download
-is deliberately NOT attempted automatically, since there is no confirmed
-official direct-download URL for it (the pack is normally provided locally
-via MPLAB X/MCC).
+Automatically installs whatever can be safely automated (pyocd via pip, and since
+2026-09-01 the Microchip.SAME54_DFP pack itself - see flash_same54.download_pack()).
+Also checks USB probe visibility, printing clear, concrete next steps for anything
+still missing. No MPLAB X/MCC installation is required for any of this.
 
 Usage:
     python install_prereqs.py            # check, then pick the probe
@@ -29,7 +27,7 @@ PYOCD_PIN = "0.43.0"  # verified on real hardware; 0.44.1 causes SWD connection 
 
 sys.path.insert(0, str(Path(__file__).parent))
 # Same pack search, same bench.json handling as flash_same54.py - one implementation each.
-from flash_same54 import BENCH_PATH, find_pack_dir, load_bench, save_bench
+from flash_same54 import BENCH_PATH, SAME54_DFP_URL, download_pack, find_pack_dir, load_bench, save_bench
 
 
 def check_python():
@@ -188,20 +186,33 @@ def select_probe(probes):
     return True
 
 
-def check_pack():
+def check_pack(install):
     pack_dir = find_pack_dir()
-    if pack_dir is None:
+    if pack_dir is not None:
+        print(f"OK: Microchip.SAME54_DFP pack found: {pack_dir}")
+        return True
+
+    if not install:
         print(
             "MISSING: no Microchip.SAME54_DFP pack found locally.\n"
-            "         This tool does NOT download it automatically (no confirmed official\n"
-            "         direct-download URL). Two options:\n"
-            "         1) Install MPLAB X (or just open it once) -- it downloads the pack\n"
-            "            automatically into the local cache (~/.mchp_packs/Microchip/SAME54_DFP/...).\n"
-            "         2) Download it manually from https://packs.download.microchip.com/ and\n"
-            "            pass it explicitly with --pack <path> when flashing."
+            f"         Run this tool again with --install to download it automatically from\n"
+            f"         {SAME54_DFP_URL}\n"
+            "         (no MPLAB X / MCC installation needed - flash_same54.py does this on its\n"
+            "         own too, the first time it's run without a local pack)."
         )
         return False
-    print(f"OK: Microchip.SAME54_DFP pack found: {pack_dir}")
+
+    print("Downloading Microchip.SAME54_DFP pack (no MPLAB X / MCC found locally) ...")
+    try:
+        pack_path = download_pack()
+    except RuntimeError as exc:
+        print(
+            f"ERROR: automatic pack download failed: {exc}\n"
+            "       Download it manually from https://packs.download.microchip.com/ and pass\n"
+            "       it explicitly with --pack <path> when flashing."
+        )
+        return False
+    print(f"OK: Microchip.SAME54_DFP pack downloaded and cached: {pack_path}")
     return True
 
 
@@ -226,7 +237,7 @@ def main():
     probes = get_probes()
     results.append(check_probes(probes))
     print()
-    results.append(check_pack())
+    results.append(check_pack(args.install))
     print()
 
     # Always ask, with or without --install: which board flash.bat will overwrite is
