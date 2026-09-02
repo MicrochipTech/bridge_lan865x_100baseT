@@ -29,3 +29,10 @@ firmware/tcpip_iperf_lan865x.X/.generated_files/
 
 # Python bytecode cache of the host-side scripts (scripts\*.py).
 __pycache__/
+
+# MPLAB X build output - object files, dependency lists, linker output and the
+# timestamped image archive scripts\build_summary.py keeps. Derived from the
+# tracked sources by build.bat and rewritten on every build (164 .o plus 164 .d,
+# ~14 MB); a fresh clone has neither directory until it builds once.
+firmware/tcpip_iperf_lan865x.X/build/
+firmware/tcpip_iperf_lan865x.X/dist/
