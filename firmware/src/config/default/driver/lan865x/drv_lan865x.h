@@ -111,8 +111,8 @@ typedef struct _DRV_LAN865X_Configuration
     bool rxCutThrough;
 
     /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3),
-     * ported from the sister project (t1s_100baset_bridge/firmware/src/config/default/
-     * driver/lan865x/drv_lan865x.h): true suppresses T1SPMACTL.TXD as its own init
+     * ported from a related in-house project: true suppresses T1SPMACTL.TXD as
+     * its own init
      * step, before NETWORK_CONTROL (TXEN) is ever written - so the PHY transmitter
      * never goes live, not even briefly. Set from the persisted env (see
      * initialization.c, right after ENV_Init()). Re-apply this field after every

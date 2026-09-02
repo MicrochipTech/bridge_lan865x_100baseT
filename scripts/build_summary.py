@@ -2,8 +2,8 @@ r"""
 build_summary.py — Post-build memory and interrupt summary for the
                    T1S<->100BASE-T bridge firmware.
 
-Ported from the sister project (t1s_100baset_bridge/scripts/build_summary.py,
-2026-09-01), unchanged apart from the output image filename prefix.
+Ported from a related in-house project (2026-09-01), unchanged apart from
+the output image filename prefix.
 
 Reads:
   * memoryfile.xml  — total flash / RAM from the linker (MPLAB X writes this

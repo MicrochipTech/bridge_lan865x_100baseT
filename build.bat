@@ -5,7 +5,7 @@ setlocal EnableDelayedExpansion
 :: build.bat - Shell build for tcpip_iperf_lan865x (T1S<->100BASE-T bridge
 :: work-in-progress, based on the Microchip net_10base_t1s content repo).
 ::
-:: Ported from the sister project t1s_100baset_bridge's build.bat. Drives
+:: Ported from a related in-house project's build.bat. Drives
 :: MPLAB X's own generated NetBeans-style Makefile (nbproject\Makefile-impl.mk
 :: etc.) via MPLAB X's bundled 'make', the same mechanism the IDE itself uses.
 ::
@@ -43,7 +43,7 @@ if not defined MPLABX_MAKE (
 )
 echo Make      : %MPLABX_MAKE%
 
-rem Parallel compile, same rationale as the sister project's build.bat: the
+rem Parallel compile, same rationale as that project's build.bat: the
 rem per-configuration makefile inherits the jobserver via ${MAKE}, so compile
 rem rules run concurrently. -Otarget keeps each compiler's output together.
 if not defined BUILD_JOBS set "BUILD_JOBS=%NUMBER_OF_PROCESSORS%"

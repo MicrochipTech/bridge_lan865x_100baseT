@@ -46,8 +46,8 @@
 
 #define MIRROR_MAX_FRAME  1518u
 
-/* Mitigation, not a bridge-side bug fix (docs/SNIFFER_4_ERGEBNISSE.md,
- * 2026-08-27): frames mirrored to eth1 above this length made the PC's own
+/* Mitigation, not a bridge-side bug fix (investigated 2026-08-27):
+ * frames mirrored to eth1 above this length made the PC's own
  * USB-Ethernet adapter/Npcap capture silently stop receiving anything for a
  * while (no Windows PnP/link event, no error anywhere on the bridge itself -
  * ack_ok/ack_fail proved the GMAC always completed the TX). 1514 = the
@@ -97,7 +97,7 @@ static uint32_t s_dbg_rx_passed_filter = 0u; /* survived the dest-MAC filter (or
 static uint32_t s_dbg_pool_empty = 0u;       /* s_mirror_free_pkts was empty */
 static uint32_t s_dbg_no_eth1 = 0u;          /* TCPIP_STACK_IndexToNet(MIRROR_DST_IF) was NULL */
 static uint32_t s_dbg_tx_submitted = 0u;     /* handed to DRV_GMAC_PacketTx */
-/* Added 2026-08-27 (docs/SNIFFER_4_ERGEBNISSE.md): tx_submitted only proves the
+/* Added 2026-08-27: tx_submitted only proves the
  * frame was HANDED to DRV_GMAC_PacketTx(), not that the GMAC actually
  * finished sending it - the whole point of this investigation is that the
  * firmware side looks "fine" while the PC never receives large frames.
@@ -376,7 +376,7 @@ static void mirror_print_dbg_counters(SYS_CMD_DEVICE_NODE* pCmdIO) {
                        (unsigned long)s_dbg_ack_ok, (unsigned long)s_dbg_ack_fail,
                        (int)s_dbg_last_ack_res, (unsigned)s_dbg_max_len_submitted,
                        (unsigned)s_dbg_max_len_ok);
-    CMD_PRINT(pCmdIO, "  dbg: truncated=%lu (frames cut to %u bytes before mirroring, see docs/SNIFFER_4_ERGEBNISSE.md)\n\r",
+    CMD_PRINT(pCmdIO, "  dbg: truncated=%lu (frames cut to %u bytes before mirroring)\n\r",
                        (unsigned long)s_dbg_truncated, (unsigned)MIRROR_SAFE_FRAME_LEN);
 }
 

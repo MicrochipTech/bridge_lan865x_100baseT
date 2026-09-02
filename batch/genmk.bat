@@ -40,8 +40,8 @@ if not exist "%~1\nbproject\configurations.xml" (
 
 rem Newest installed MPLAB X first - scanned dynamically (dir /o-n = newest
 rem version-string first), same mechanism build.bat uses to find make.exe.
-rem A hardcoded version list (this file's original form, ported from the
-rem sister project) silently picks a STALE version once a newer one is
+rem A hardcoded version list (this file's original form, as originally
+rem ported) silently picks a STALE version once a newer one is
 rem installed that isn't in the list - confirmed 2026-08-31 on this machine
 rem (v6.25 and v6.35 both installed; a "v6.25 v6.20 ..." list picked v6.25,
 rem producing a Makefile-local-default.mk with a different DFP_DIR/Java path

@@ -2,9 +2,8 @@
 """
 iperf_matrix_test.py - iperf UDP/TCP test matrix across the T1S bridge setup.
 
-Ported from the sister project (t1s_100baset_bridge/scripts/iperf_matrix_test.py,
-2026-08-28), adapted for this project's own bench addresses. See that project's
-docs/FALLSTRICKE.md for the full history of pitfalls this script's design avoids.
+Ported from a related in-house project (2026-08-28), adapted for this
+project's own bench addresses.
 
 Tests every directed pair among the four nodes:
     PC, Bridge, Follower A, Follower B
@@ -19,7 +18,7 @@ Bridge and Follower A/B are controlled over their EDBG virtual COM port
 using the same "iperf"/"iperfk" CLI commands documented in this project's
 CLAUDE.md. The PC uses the real iperf2 binary (jperf-2.0.2/bin/iperf.exe).
 
-Trust rule (important, ported verbatim from the sister project's docs/FALLSTRICKE.md
+Trust rule (important, carried over verbatim from that project's own notes,
 2026-08-27): the embedded iperf CLIENT's own self-reported UDP loss is
 meaningless - it never receives real feedback from the far end, so it
 always prints ~0% loss regardless of what actually arrived. Only a
@@ -44,7 +43,7 @@ Output:
       docs/iperf_matrix_results.log) as they complete, so a run that's
       interrupted partway still leaves a usable log.
 
-Windows timer resolution (ported verbatim, sister project's docs/FALLSTRICKE.md
+Windows timer resolution (carried over verbatim from the same notes,
 2026-08-28): the real iperf.exe's UDP client paces packets via a sleep loop,
 and Windows' default ~15.6 ms timer resolution makes it fall behind and
 catch up in bursts of several packets within under a millisecond - the
@@ -69,7 +68,7 @@ import serial  # pyserial
 # COM ports / IPs as verified live on this bench, 2026-08-31 (see
 # CLAUDE.md for the hardware setup). Override on the command line if your
 # bench differs. Note: FollowerA/FollowerB here are the SAME physical
-# boards as the sister project's t1s_100baset_bridge bench (COM10/COM23),
+# boards as the reference bench this was developed against (COM10/COM23),
 # shared across projects on this T1S segment - COM10's eth0 MAC was
 # corrected to 00:04:25:CA:CE:DB on 2026-08-31 (collided with this
 # project's own Bridge eth0 MAC beforehand, a leftover from earlier,

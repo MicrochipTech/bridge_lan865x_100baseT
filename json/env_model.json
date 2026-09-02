@@ -22,7 +22,7 @@
       "accepts_ids": [
         "LANE"
       ],
-      "description": "10BASE-T1S <-> 100BASE-T layer 2 bridge on the SAM E54, built on the Microchip net_10base_t1s Harmony content repo (fork: net_10base_t1s_bridge). Sister firmware to EBRG v5 (t1s_100baset_bridge) - same field layout, different board population (LAN865x on both, LAN8742A instead of LAN8740A on the 100BASE-T side).",
+      "description": "10BASE-T1S <-> 100BASE-T layer 2 bridge on the SAM E54, built on the Microchip net_10base_t1s Harmony content repo. Shares its field layout with EBRG v5 of a related in-house project, which uses a different board population (LAN865x on both, LAN8742A instead of LAN8740A on the 100BASE-T side).",
       "source": {
         "file": "firmware/src/env.c",
         "struct": "env_t",
@@ -177,7 +177,7 @@
   },
   "known_other_ids": {
     "LANE": "Written before ids were per-variant. Ambiguous: both this firmware and t1s_ptp_bridge used it. Accepted by this firmware only when version and crc also match its own layout; rewritten as TIBR on the next saveenv.",
-    "EBRG": "The sister project t1s_100baset_bridge's own id - same size (72 bytes) and version (5) as TIBR, but a distinct magic, so never mistaken for it. Not accepted by this firmware.",
+    "EBRG": "A related in-house project's own id - same size (72 bytes) and version (5) as TIBR, but a distinct magic, so never mistaken for it. Not accepted by this firmware.",
     "EPTP": "Reserved for t1s_ptp_bridge, whose record is 68 bytes (ptp_auto/ptp_ival instead of mirror/sniffer) - distinguishable by size alone."
   }
 }

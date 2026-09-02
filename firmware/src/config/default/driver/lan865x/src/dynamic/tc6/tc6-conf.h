@@ -144,8 +144,8 @@ extern "C" {
  * live-verified 2026-09-01 via the iperf matrix test (Bridge -> FollowerA/B
  * TCP both failed at 0.00 Mbit/s, "stats" showed eth0 err>0 but qFull=0,
  * pinpointing the "Not enough TC6 Segments" branch, not a full TX queue).
- * Same fix as the sister project (t1s_100baset_bridge) and this repo's own
- * apps/follower_lan865x, both already at 3u. Re-runs of Generate Code that
+ * Same fix as a related in-house project and the companion follower
+ * application, both already at 3u. Re-runs of Generate Code that
  * touch this file reset it to 1u - reapply after every regenerate. */
 #ifndef TC6_TX_ETH_MAX_SEGMENTS
 #define TC6_TX_ETH_MAX_SEGMENTS    (3u)

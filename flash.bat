@@ -9,7 +9,7 @@ rem           flash.bat <file.hex> ...   ... flash a different image
 rem           flash.bat --list           ... list connected probes
 rem           flash.bat --probe <serial> ... pick a probe for a single run
 rem
-rem  Ported from the sister project t1s_100baset_bridge's flash.bat/
+rem  Ported from a related in-house project's flash.bat/
 rem  flash_same54.py. Uses this project's own .venv (see setup.bat) -
 rem  falls back to the bare "python" from PATH if it's missing.
 rem

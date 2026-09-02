@@ -481,7 +481,7 @@ void LAN865X_DIAG_ApplyPlca(uint8_t node_id, uint8_t node_cnt) {
     }
     s_plca_node_id  = node_id;
     s_plca_node_cnt = node_cnt;
-    /* Sister project (t1s_100baset_bridge) also updates the driver's internal node-id
+    /* A related in-house project also updates the driver's internal node-id
      * shadow here via DRV_LAN865X_SetPlcaNodeId(), so it survives a driver-triggered
      * Loss-of-Framing-Error re-init. That function is itself a hand-patch to that
      * project's drv_lan865x.h/drv_lan865x_api.c (not a stock Harmony driver API) and is

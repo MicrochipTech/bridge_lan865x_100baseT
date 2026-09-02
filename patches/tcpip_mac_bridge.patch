@@ -1,7 +1,7 @@
-diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
+diff --git a/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c b/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
 index 62ff7c3..c419ba3 100644
---- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
-+++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
+--- a/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
++++ b/firmware/src/config/default/library/tcpip/src/tcpip_mac_bridge.c
 @@ -924,7 +924,23 @@ TCPIP_MAC_BRIDGE_PKT_RES TCPIP_MAC_Bridge_ProcessPacket(TCPIP_MAC_PACKET* pRxPkt
      // forward
      fwdDcpt.tReceive = F_MAC_Bridge_GetSecond();

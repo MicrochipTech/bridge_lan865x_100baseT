@@ -98,7 +98,7 @@ int TCPIP_STACK_InitCallback(const struct TCPIP_STACK_INIT** ppStackInit)
     return 0;
 }
 
-/* Ported from the sister project (t1s_100baset_bridge/firmware/src/app.c):
+/* Ported from a related in-house project:
    a hardcoded user/password check, registered with the Telnet server so an
    unauthenticated client cannot get a shell on the bridge over the network. */
 bool TelnetAuthenticationHandler(const char* user, const char* password, const TCPIP_TELNET_CONN_INFO* pInfo, const void* hParam)
@@ -137,7 +137,7 @@ static uint32_t my_delay_time = 0;
 
 static SYS_TIME_HANDLE timerHandle;
 
-/* How fast the cooperative main loop actually spins - ported from the sister
+/* How fast the cooperative main loop actually spins - ported from a related
  * project alongside 'stats', where it is used to help separate the main-loop
  * cadence from the link/PLCA as a throughput ceiling. Incremented once per
  * APP_STATE_IDLE iteration; BRIDGE_TimerCallback (1 Hz) snapshots the delta
@@ -367,7 +367,7 @@ static void cmd_uptime(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
         (unsigned long)total_s);
 }
 
-/* Ported from the sister project (t1s_100baset_bridge/firmware/src/app.c) to
+/* Ported from a related in-house project to
    read live config/state (structs, driver descriptors, register-backed
    variables) straight out of RAM over the CLI instead of guessing from source.
    One SYS_CONSOLE_PRINT() call per line instead of one per byte, and a wait

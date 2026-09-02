@@ -44,7 +44,7 @@
 
     Frames above MIRROR_SAFE_FRAME_LEN (1514, standard max Ethernet frame
     without FCS) are TRUNCATED before mirroring, not passed through whole -
-    see the constant's comment in port_mirror.c and docs/SNIFFER_4_ERGEBNISSE.md.
+    see the constant's comment in port_mirror.c.
     Root-caused there: full-size (>1514) frames mirrored to eth1 reliably
     wedge the PC's own USB-Ethernet adapter/Npcap capture for several
     seconds, confirmed to be outside this firmware (the GMAC driver reports

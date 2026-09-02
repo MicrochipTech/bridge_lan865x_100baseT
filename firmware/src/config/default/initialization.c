@@ -820,8 +820,8 @@ void SYS_Initialize ( void* data )
      * the bus with the wrong identity. env_apply() (called later, from app.c) still
      * matters for a live 'setenv plca_id/plca_cnt' + 'saveenv' change while running.
      *
-     * Same reasoning for suppressTx (ported 2026-08-31 from the sister project,
-     * t1s_100baset_bridge - drv_lan865x.h/drv_lan865x_api.c there, and now here too):
+     * Same reasoning for suppressTx (ported 2026-08-31 from a related in-house
+     * project - drv_lan865x.h/drv_lan865x_api.c there, and now here too):
      * a board persisted as a permanent sniffer ('setenv sniffer 1' + 'saveenv') must
      * never put a signal on the bus, not even for the fraction of a second between
      * NETWORK_CONTROL/TXEN and a later app-level fix-up - see drv_lan865x_api.c's

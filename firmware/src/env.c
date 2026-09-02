@@ -43,7 +43,7 @@
  *
  * New variants pick their own four characters and never reuse one. */
 #define ENV_MAGIC    0x54494252u   /* 'TIBR' - tcpip_iperf_lan865x bridge, this firmware (distinct from
-                                     * the t1s_100baset_bridge variant's 'EBRG' per the convention above:
+                                     * a related variant's 'EBRG' per the convention above:
                                      * different project, different board population, must not silently
                                      * accept that variant's stored record). */
 #define ENV_MAGIC_LEGACY 0x4C414E45u /* 'LANE' - written before ids were per-variant.

@@ -66,7 +66,7 @@ CONFIG_FILE = Path(__file__).parent.parent / "json" / "bridge_config.json"
 # Flash/Erase over the EDBG probe (SWD), independent of the open serial link - see
 # flash_current_hex()/erase_chip(). RELEASE_HEX points at the tracked release\ HEX
 # build.bat refreshes after every successful build (CLAUDE.md section 2) - like the
-# sister project's GUI, so a fresh clone can flash without building first. Not the
+# related project's GUI, so a fresh clone can flash without building first. Not the
 # dist\ build output directly: that one only exists after a local build, and picking
 # it as the default would silently flash a stale/never-built path on a fresh clone.
 # FLASH_SAME54_SCRIPT already knows how to find the SAME54_DFP pack and pick a
@@ -1701,7 +1701,7 @@ Example commands:
         """Flash a hex file YOU pick, not necessarily RELEASE_HEX -- e.g. a fresh local
         build (dist/default/production/...hex), one from another branch, or one
         someone else sent you. Starts browsing wherever the current selection sits
-        (release\\ by default, same as the sister project's "Select Hex..."). The
+        (release\\ by default). The
         choice also becomes the new default for "Flash", so picking once covers
         every later flash until this is used again."""
         initial_dir = (self._selected_hex_path.parent

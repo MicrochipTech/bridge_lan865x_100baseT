@@ -49,12 +49,12 @@ PATCHES_DIR = Path(__file__).resolve().parent
 STDARG_FIXES = [
     (
         "drv_lan865x_api.c stdarg.h",
-        "apps/bridge_lan865x_100baseT/firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c",
+        "firmware/src/config/default/driver/lan865x/src/dynamic/drv_lan865x_api.c",
         '#include "configuration.h"',
     ),
     (
         "telnet.c stdarg.h",
-        "apps/bridge_lan865x_100baseT/firmware/src/config/default/library/tcpip/src/telnet.c",
+        "firmware/src/config/default/library/tcpip/src/telnet.c",
         '#include "net_pres/pres/net_pres_socketapi.h"',
     ),
 ]

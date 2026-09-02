@@ -1524,9 +1524,9 @@ bool TC6_CB_OnSpiTransaction(uint8_t tc6instance, uint8_t *pTx, uint8_t *pRx, ui
  * intermittent, non-deterministic RX segLen corruption (same periodic
  * message observed both several bytes short and several bytes over,
  * confirmed via runtime chunk-trace instrumentation) - the same class of
- * bug (a task-level "lock" that does not actually block the racing ISR) the
- * sister project (t1s_100baset_bridge) found and fixed for its own GMAC RX
- * path, documented in its docs/FALLSTRICKE.md.
+ * bug (a task-level "lock" that does not actually block the racing ISR) that
+ * a related in-house project found and fixed for its own GMAC RX
+ * path.
  * DRV_LAN865X_INSTANCES_NUMBER == 1 in this project (see configuration.h) -
  * a single saved-interrupt-state variable is safe as long as _Lock()/
  * _Unlock() calls are not nested, which matches every call site in this
@@ -2115,7 +2115,7 @@ static bool _InitUserSettings(DRV_LAN865X_DriverInfo * pDrvInst)
             break;
         case 9:
             /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3),
-             * ported from the sister project: suppress the PHY transmitter (T1SPMACTL.TXD)
+             * ported from a related in-house project: suppress the transmitter (TXD)
              * BEFORE NETWORK_CONTROL/TXEN is ever written, for a board persisted as a
              * permanent sniffer - see drvCfg.suppressTx / initialization.c. T1SPMACTL is
              * untouched by every earlier step here, reset default 0x0000, so a plain write

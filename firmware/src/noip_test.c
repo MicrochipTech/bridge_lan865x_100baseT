@@ -110,9 +110,9 @@ static void noip_pkt_ack(TCPIP_MAC_PACKET *pkt, const void *param) {
 }
 
 /* Send one raw Ethernet frame straight out eth0 via DRV_LAN865X_PacketTx() -
- * this project's LAN865x driver (newer package than the sister project's)
- * does not export a DRV_LAN865X_SendRawEthFrame() convenience wrapper (that
- * function is itself a hand-patch to the sister project's driver, not a
+ * this project's LAN865x driver (a newer package) does not export a
+ * DRV_LAN865X_SendRawEthFrame() convenience wrapper (that function is itself
+ * a hand-patch in a related project's driver, not a
  * stock Harmony API - see CLAUDE.md section 3), so this reimplements the
  * same raw-TX behavior using the stock allocate/submit path, the same
  * pattern port_mirror.c's cmd_bigframe() already uses for eth1/GMAC.

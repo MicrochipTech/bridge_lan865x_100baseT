@@ -2,7 +2,7 @@
 :: ===========================================================================
 :: run_term.bat - double-click: three serial consoles in ONE window, ready to go.
 ::
-:: Ported from the sister project t1s_100baset_bridge's run_term.bat. Which
+:: Ported from a related in-house project's run_term.bat. Which
 :: board is on which COM port comes from json\term_ports.json (per-machine,
 :: gitignored) - use "Setup > Configure Ports" inside the tool to set it up,
 :: not by hand. This bench's three boards: COM8 (this bridge), COM10 (A),

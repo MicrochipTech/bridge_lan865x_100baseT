@@ -19,9 +19,9 @@ setlocal
 :: probe check can detect it. Steps are independent: a failure in one is
 :: reported but does not abort the rest.
 ::
-:: Ported from the sister project t1s_100baset_bridge's setup.bat. Includes
+:: Ported from a related in-house project's setup.bat. Includes
 :: its XC32 compiler-selection step (scripts\setup_compiler.py) even though,
-:: same as in the sister project, it's advisory only here - build.bat does
+:: same as there, it's advisory only here - build.bat does
 :: not read setup_compiler.config for the actual build (see that script's
 :: own docstring for why). Useful anyway when more than one XC32 version is
 :: installed, to record and see which one you intend to use.

@@ -5,7 +5,7 @@ Scans C:\Program Files\Microchip\xc32\ for installed versions, lets you pick
 one, and writes the choice to setup_compiler.config (JSON) at the project
 root.
 
-Ported from the sister project t1s_100baset_bridge's scripts\setup_compiler.py.
+Ported from a related in-house project's scripts\setup_compiler.py.
 One deliberate difference: THIS project's build.bat does not read
 setup_compiler.config for the actual build (and never will - passing
 MP_CC_DIR/the compiler bin dir on the make command line silently breaks
@@ -15,9 +15,9 @@ actually builds is determined by nbproject\Makefile-local-default.mk
 nbproject\configurations.xml's languageToolchainVersion). This script is
 therefore advisory only - a place to record and see which version you
 *intend* to use, useful when more than one is installed - not a build
-control. (The sister project's own build.bat makes the same point: its
-build.bat only feeds this value to build_summary.py's xc32-nm step, which
-neither this project nor the sister's follower/ has either.)
+control. (The originating project's own build.bat makes the same point: it
+only feeds this value to build_summary.py's xc32-nm step, which neither this
+project nor its follower application has either.)
 
 Usage:
     python setup_compiler.py

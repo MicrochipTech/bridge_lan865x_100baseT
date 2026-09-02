@@ -3,7 +3,7 @@ rem ===========================================================================
 rem  run_gui.bat - launches scripts\bridge_gui.py (Bridge Status & Configuration
 rem                GUI) against the board's EDBG virtual COM port.
 rem
-rem  Ported from the sister project t1s_100baset_bridge's run_gui.bat. Uses
+rem  Ported from a related in-house project's run_gui.bat. Uses
 rem  this project's own .venv (see setup.bat) - same pattern as cli.bat/
 rem  flash.bat - falls back to the bare "python" from PATH if it's missing.
 rem ===========================================================================

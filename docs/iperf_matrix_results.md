@@ -1,7 +1,7 @@
 # iperf Throughput Matrix — Results
 
 Full 12-direction `iperf` matrix from `scripts\iperf_matrix_test.py`, run on
-2026-09-01 against this bench's own bridge (not the sister project's).
+2026-09-01 against this bench's own bridge.
 Raw, unabridged output (every rate step, every captured device report) is in
 [`iperf_matrix_results.log`](iperf_matrix_results.log).
 
@@ -62,8 +62,8 @@ the first step over the 2% loss threshold).
   payload data (not just an ACK), which the driver rejected outright.
   Forwarded PC↔Follower traffic and bare ACKs (1 segment) were never
   affected — only the bridge acting as a TCP *client* toward a T1S node.
-  Fixed 2026-09-01 (`1u → 3u`, matching the sister project and this repo's
-  own `apps/follower_lan865x`; full write-up in
+  Fixed 2026-09-01 (`1u → 3u`, matching the value the companion follower
+  application already used; full write-up in
   [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md) item 10).
   **Re-verified after rebuild/reflash:** both directions now report
   **5.85 Mbit/s TCP**, in line with every other T1S-crossing TCP direction,

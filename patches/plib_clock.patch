@@ -1,7 +1,7 @@
-diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/peripheral/clock/plib_clock.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/peripheral/clock/plib_clock.c
+diff --git a/firmware/src/config/default/peripheral/clock/plib_clock.c b/firmware/src/config/default/peripheral/clock/plib_clock.c
 index 22cbb13..d593506 100644
---- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/peripheral/clock/plib_clock.c
-+++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/peripheral/clock/plib_clock.c
+--- a/firmware/src/config/default/peripheral/clock/plib_clock.c
++++ b/firmware/src/config/default/peripheral/clock/plib_clock.c
 @@ -52,12 +52,33 @@ static void OSC32KCTRL_Initialize(void)
      OSC32KCTRL_REGS->OSC32KCTRL_RTCCTRL = OSC32KCTRL_RTCCTRL_RTCSEL(0U);
  }

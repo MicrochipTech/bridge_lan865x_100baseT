@@ -1,7 +1,7 @@
-diff --git a/apps/bridge_lan865x_100baseT/firmware/src/config/default/system/command/src/sys_command.c b/apps/bridge_lan865x_100baseT/firmware/src/config/default/system/command/src/sys_command.c
+diff --git a/firmware/src/config/default/system/command/src/sys_command.c b/firmware/src/config/default/system/command/src/sys_command.c
 index 495e196..7917ae5 100644
---- a/apps/bridge_lan865x_100baseT/firmware/src/config/default/system/command/src/sys_command.c
-+++ b/apps/bridge_lan865x_100baseT/firmware/src/config/default/system/command/src/sys_command.c
+--- a/firmware/src/config/default/system/command/src/sys_command.c
++++ b/firmware/src/config/default/system/command/src/sys_command.c
 @@ -462,6 +462,26 @@ static void RunCmdTask(SYS_CMD_IO_DCPT* pCmdIO)
          ParseCmdBuffer(pCmdIO);
          (*pCmdApi->msg)(cmdIoParam, promptStr);

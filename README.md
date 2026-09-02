@@ -10,15 +10,13 @@ control, a raw-Ethernet loopback test, a TCP echo test server, a built-in
 an Emulated EEPROM (§6.2), all reachable over **two independent consoles at
 once** — the EDBG serial port and a Telnet server on the 100BASE-T side (§10).
 
-Sister firmware to `t1s_100baset_bridge`: same ATSAME54P20A, same LAN865x
-(`eth0`, T1S) driven the same way, same core module set (`env.c`,
-`lan865x_diag.c`, `noip_test.c`, `port_mirror.c`) — but not identical. This
-project's `eth1` (100BASE-T) is driven by an external **LAN8742A** PHY over
-the SAM E54's internal GMAC instead of the sister's LAN8740A, it adds a
-**Telnet console** and a **TCP echo test server** (`testserver`) neither of
-which the sister has, and its hand-patches to MCC-generated code are tracked
-by a small automated tool (`patches\apply_patches.py`, §5.5) rather than
-reapplied by hand.
+The firmware is built from a small set of self-contained modules: `env.c`
+(persistent configuration on an emulated EEPROM), `lan865x_diag.c` (registers,
+IEEE test modes, PLCA), `noip_test.c` (raw EtherType-0x88B5 frames) and
+`port_mirror.c` (the SPAN/sniffer path). Beyond the bridge itself it offers a
+**Telnet console** and a **TCP echo test server** (`testserver`), and its
+hand-patches to MCC-generated code are tracked by a small automated tool
+(`patches\apply_patches.py`, §5.5) rather than reapplied by hand.
 
 ---
 
@@ -183,13 +181,12 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
 ## 3. Hardware setup
 
 Built on a Microchip SAM E54 host with the T1S side on the **MIKROE-5543
-Two-Wire ETH Click (LAN8651)** — same board population as the sister
-project's `eth0`. `eth1` is driven by the SAM E54's internal **GMAC** over
-RMII; the MCC PHY driver component selected for it is **LAN8742A**, but the
-physical daughter-card actually fitted on this bench is the same
-**AC320004-3** board the sister project uses (LAN8740A) — confirmed by
-flashing the sister's own firmware onto this board's `eth1` and seeing it
-come up immediately, no hardware change. See
+Two-Wire ETH Click (LAN8651)**. `eth1` is driven by the SAM E54's internal
+**GMAC** over RMII; the MCC PHY driver component selected for it is
+**LAN8742A**, while the physical daughter-card fitted on this bench is an
+**AC320004-3** board (LAN8740A) — the pairing was confirmed by flashing a
+known-good LAN8740A image onto this board's `eth1` and seeing it come up
+immediately, no hardware change. See
 [`docs/how-to-bridge.md`](docs/how-to-bridge.md) for the MCC-level GMAC/PHY
 configuration steps actually performed, and
 [`docs/bridge-configuration-manual.md`](docs/bridge-configuration-manual.md)
@@ -219,8 +216,8 @@ to land.
 > | AC320004-7 | KSZ8863 | 3-port managed switch (2 integrated PHYs + 1 RMII/MII host port) | VLAN support, integrated switch fabric |
 >
 > Swapping to any of these requires selecting the matching Harmony PHY
-> driver component in MCC and regenerating — see the `DRV_ETHPHY_LAN8740`/
-> `drv_extphy_lan8740.c` note in the sister project for what that entails.
+> driver component in MCC and regenerating — the driver component, not just a
+> configuration value, has to change.
 
 ### How `eth0` (LAN865x) is wired
 
@@ -494,7 +491,7 @@ serials, `--probe <serial>` overrides the recorded choice for one run, and
 `json\bench.json` never blocks a flash; the file is gitignored, being per-bench
 and meaningless on another machine.
 
-Like the sister project, `build.bat` copies the resulting HEX into a
+`build.bat` copies the resulting HEX into a
 tracked **`release\bridge_lan865x_100baseT.hex`** after every successful
 build, so a fresh clone can flash without building first — `flash.bat`
 defaults to exactly that file. Only `build.bat` refreshes `release\`; a
@@ -785,7 +782,7 @@ Indicator, optionally with a periodic report (`sqi report <sec>`).
 
 ## 10. Telnet console (TCP/23)
 
-Unlike the sister project, this firmware exposes its full CLI over a second,
+This firmware exposes its full CLI over a second,
 independent transport: **Telnet on TCP/23**, alongside the EDBG serial port.
 Same command groups, same commands — the only difference is which console a
 reply goes back over, handled uniformly by `cmd_print.h`'s

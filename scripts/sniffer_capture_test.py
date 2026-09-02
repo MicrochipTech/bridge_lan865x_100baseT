@@ -2,10 +2,8 @@
 """
 sniffer_capture_test.py - validate the bridge's "sniffer" mirror path.
 
-Ported from the sister project (t1s_100baset_bridge/scripts/sniffer_capture_test.py),
-adapted for this project's own bench addresses. See that project's
-docs/SNIFFER_1_HYPOTHESEN.md through SNIFFER_4_ERGEBNISSE.md for the full
-history of the bug this test validates the mitigation for.
+Ported from a related in-house project, adapted for this project's own
+bench addresses.
 
 Enables `sniffer` on the bridge (mirrors every eth0/T1S frame to eth1, for
 the PC to capture - see CLAUDE.md/port_mirror.c), then runs real UDP and
@@ -26,7 +24,7 @@ checks whether the capture is actually complete:
       connection.
 
 Also checks for frame-length truncation (MIRROR_SAFE_FRAME_LEN, see
-port_mirror.c / the sister project's docs/SNIFFER_4_ERGEBNISSE.md): a
+port_mirror.c): a
 captured frame shorter than what its own IP/UDP header claims would mean
 real payload bytes are missing, not just harmless trailing padding.
 
@@ -309,7 +307,7 @@ Examples:
                           "(default: 5.0). This is a fixed rate, not a search like "
                           "iperf_matrix_test.py's UDP Max - raise it to stress-test "
                           "the sniffer mirror path closer to the T1S ceiling "
-                          "(~9.4 Mbit/s on the sister project's bench).")
+                          "(~9.4 Mbit/s on the reference bench).")
     ap.add_argument("--cap-dir", default=".",
                      help="directory to write the four .pcapng capture files into "
                           "(default: current directory). Created if it doesn't exist.")

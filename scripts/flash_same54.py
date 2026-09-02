@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generic pyOCD-based flash tool for Microchip ATSAME54 boards (EDBG/nEDBG CMSIS-DAP probes).
 
-Ported from the sister project t1s_100baset_bridge (scripts\\flash_same54.py, itself
+Ported from a related in-house project (scripts\\flash_same54.py, itself
 ported from C:\\work\\parser\\test\\usart_ring_buffer_interrupt\\tools\\flash_same54.py).
 Verified against a real ATSAME54_ETH1-family board over its on-board EDBG probe. Key
 finding this tool works around: pyOCD's public pack index only offers an outdated

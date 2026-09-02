@@ -2,7 +2,7 @@
 """
 cli.py - Send CLI commands to the firmware over its EDBG virtual COM port.
 
-Ported from the sister project t1s_100baset_bridge (scripts\\cli.py), unchanged.
+Ported from a related in-house project (scripts\\cli.py), unchanged.
 
 Usage:
   python cli.py "netinfo" "stats"
