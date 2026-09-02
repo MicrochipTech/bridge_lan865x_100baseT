@@ -16,3 +16,16 @@ setup_compiler.config
 # (local screenshot folder, session-log habit), not project documentation.
 # The actual project knowledge lives in docs\ and is tracked normally.
 CLAUDE.md
+
+# MPLAB X build fragments - generated per machine by prjMakefilesGenerator
+# (see batch\genmk.bat / build.bat, README section 5.2). They hold absolute
+# paths of the machine that generated them (Makefile-local-default.mk carries
+# the XC32 and MPLAB X install paths verbatim), so they never mean anything on
+# another bench. Only nbproject\configurations.xml and nbproject\project.xml
+# are tracked; everything derived from them is regenerated on a fresh clone.
+firmware/tcpip_iperf_lan865x.X/nbproject/Makefile-*
+firmware/tcpip_iperf_lan865x.X/nbproject/private/
+firmware/tcpip_iperf_lan865x.X/.generated_files/
+
+# Python bytecode cache of the host-side scripts (scripts\*.py).
+__pycache__/
