@@ -36,3 +36,9 @@ __pycache__/
 # ~14 MB); a fresh clone has neither directory until it builds once.
 firmware/tcpip_iperf_lan865x.X/build/
 firmware/tcpip_iperf_lan865x.X/dist/
+
+# Raw run logs the test scripts append to on the machine that runs them
+# (scripts\iperf_matrix_test.py, scripts\sniffer_capture_test.py). Bench- and
+# run-specific; the summarised results are what gets committed, under docs\.
+docs/iperf_matrix_results.log
+docs/sniffer_capture_results.log

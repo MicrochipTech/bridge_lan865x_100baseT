@@ -19,6 +19,7 @@ project was built, why particular decisions were made, and what was measured.
 | understand or re-apply a hand-patch to generated code | [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md), then [`../patches/README.md`](../patches/README.md) |
 | demo or interpret LAN8651 registers | [`register-tool-demo-examples.md`](register-tool-demo-examples.md) |
 | know what throughput to expect, and why | [`iperf_matrix_results.md`](iperf_matrix_results.md) |
+| see the firmware running on a board that has no 100BASE-TX PHY | [`three-board-rollout-report.md`](three-board-rollout-report.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
 
@@ -73,6 +74,16 @@ bridge and two T1S follower nodes: UDP rate search plus TCP, both directions
 per pair, with loss always read from the receiving side. Includes the
 `TC6_TX_ETH_MAX_SEGMENTS` finding — bridge-originated TCP failed outright at
 0.00 Mbit/s until the driver was allowed more than one segment per packet.
+
+### [`three-board-rollout-report.md`](three-board-rollout-report.md) — one image on three boards, measured
+*Written 2026-09-02.* The same firmware deployed to all three bench boards,
+including one populated with only the T1S MAC-PHY, with the configuration used
+and the numbers that came out: a six-address reachability check, the full
+twelve-direction iperf matrix, and a sniffer capture validated at the segment's
+10 Mbit/s ceiling with tshark. Ends with the three defects the run exposed —
+interface selection on a dual-homed node, an iperf session that cannot be
+killed once its ARP never resolves, and an assumption in the matrix script that
+this bench no longer satisfies.
 
 ### [`session-log.md`](session-log.md) — chronological bring-up record
 *2406 lines, by far the largest document here.* Every step of the bring-up in
