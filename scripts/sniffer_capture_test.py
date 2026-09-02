@@ -314,7 +314,7 @@ Examples:
     args = ap.parse_args()
 
     # --udp-rate takes Mbit/s. Neither link on this bench (10BASE-T1S: ~10,
-    # 100BASE-T: 100) can ever need more than 100 - a value above that is
+    # 100BASE-TX: 100) can ever need more than 100 - a value above that is
     # almost certainly bps typed by mistake, which multiplies out to a
     # Tbit/s target that overflows the embedded client's 32-bit rate field
     # (wraps to a small or even negative "Target rate").

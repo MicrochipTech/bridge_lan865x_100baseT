@@ -17,7 +17,7 @@ below.
 ```markdown
 # bridge_lan865x_100baseT — Working Instructions
 
-10BASE-T1S ↔ 100BASE-T layer-2 bridge on the ATSAME54P20A (SAM E54 Curiosity
+10BASE-T1S ↔ 100BASE-TX layer-2 bridge on the ATSAME54P20A (SAM E54 Curiosity
 Ultra + LAN8651 Click + LAN8740A daughter board). This file is intentionally
 thin and stays local (gitignored) — the actual project knowledge lives in
 `docs\` and is pulled in below.

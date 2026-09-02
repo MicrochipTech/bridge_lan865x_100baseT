@@ -23,7 +23,7 @@
     Harmony TCP/IP stack's TCP API. Runs on whichever node it is started on -
     in the intended setup that is a T1S endpoint ("follower"), not the bridge
     itself, so the test exercises the bridge's normal forwarding path end to
-    end from a PC on the 100BASE-T side.
+    end from a PC on the 100BASE-TX side.
 
   Dependencies:
     TCPIP_STACK_USE_TCP must be enabled (it already is - iperf uses it).

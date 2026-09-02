@@ -86,13 +86,14 @@ Demo sequence:
    unchanged) and press **Write**.
 3. The tool re-reads automatically — field now shows `0x00000803`.
 
-Safe for a live audience: no link drop, no side effects, single command.
+Suitable for a live audience: a single command, and no link drop or other
+side effect was observed in the tested configuration.
 
 **Alternative if you'd rather demo "silencing" something:** `T1SPMACTL`
-(`0x000308F9`, same MMS4 sub-tab) — set bit 14 (`TXD`, mask `0x4000`) to
+(`0x000308F9`, the `MMS3 PHY PMA/PMD` sub-tab) — set bit 14 (`TXD`, mask `0x4000`) to
 stop the transmitter, read back to confirm. Avoid the `LBE` loopback bit
-(bit 0) — not functionally verified on this hardware yet
-(`docs/LAN8651_TEST_MODES.md`). Also avoid `T1STSTCTL` (`0x000308FB`) test
+(bit 0) — not functionally verified on this hardware yet. Also avoid
+`T1STSTCTL` (`0x000308FB`) test
 modes 1–4 for a *live* audience — they take the T1S link down while active.
 
 ---

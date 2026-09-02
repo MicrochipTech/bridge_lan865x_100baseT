@@ -1,6 +1,6 @@
 r"""
 build_summary.py — Post-build memory and interrupt summary for the
-                   T1S<->100BASE-T bridge firmware.
+                   T1S<->100BASE-TX bridge firmware.
 
 Ported from a related in-house project (2026-09-01), unchanged apart from
 the output image filename prefix.

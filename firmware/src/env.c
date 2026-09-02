@@ -55,7 +55,7 @@
 #define ENV_VERSION_V3 3u          /* migrated in place by env_migrate_v3() - see there why */
 #define ENV_VERSION_V4 4u          /* migrated in place by env_migrate_v4() - see there why */
 #define ENV_VARIANT  "tcpip_iperf_lan865x_bridge"   /* printed by showenv next to the id */
-#define ENV_IF_CNT   2             /* [0] = eth0 (LAN865x/T1S), [1] = eth1 (GMAC/100BASE-T) */
+#define ENV_IF_CNT   2             /* [0] = eth0 (LAN865x/T1S), [1] = eth1 (GMAC/100BASE-TX) */
 #define ENV_EE_OFFSET 0u           /* byte offset of the record in the emulated EEPROM */
 
 /* SAME54 128-bit device serial number, word 0 (least-significant word). The lowest

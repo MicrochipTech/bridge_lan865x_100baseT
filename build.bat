@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 :: ===========================================================================
-:: build.bat - Shell build for tcpip_iperf_lan865x (T1S<->100BASE-T bridge
+:: build.bat - Shell build for tcpip_iperf_lan865x (T1S<->100BASE-TX bridge
 :: work-in-progress, based on the Microchip net_10base_t1s content repo).
 ::
 :: Ported from a related in-house project's build.bat. Drives

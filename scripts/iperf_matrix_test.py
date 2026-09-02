@@ -75,7 +75,7 @@ import serial  # pyserial
 # unrelated work - see docs/session-log.md).
 
 DEVICES = {
-    "Bridge":    {"port": "COM8",  "ip": "192.168.0.12"},  # eth1 (100BASE-T side)
+    "Bridge":    {"port": "COM8",  "ip": "192.168.0.12"},  # eth1 (100BASE-TX side)
     "FollowerA": {"port": "COM10", "ip": "192.168.0.201"},
     "FollowerB": {"port": "COM23", "ip": "192.168.0.202"},
 }
@@ -83,7 +83,7 @@ DEVICES = {
 # "the default interface" unless told otherwise (iperfi), which is wrong
 # whenever the target sits on the other side - resolved per destination:
 BRIDGE_ETH0_IP = "192.168.0.11"  # T1S side - use this to reach a Follower
-BRIDGE_ETH1_IP = "192.168.0.12"  # 100BASE-T side - use this to reach the PC
+BRIDGE_ETH1_IP = "192.168.0.12"  # 100BASE-TX side - use this to reach the PC
 PC_IP = "192.168.0.100"
 ALL_NODES = ["PC", "Bridge", "FollowerA", "FollowerB"]
 
@@ -237,7 +237,7 @@ def device_get_ip(name):
     if not ips:
         raise RuntimeError(f"{name}: no IP found in showenv output:\n{out}")
     # Bridge prints eth0 then eth1 - the configured DEVICES[name]["ip"]
-    # tells us which one we actually mean (eth1/100BASE-T for the Bridge).
+    # tells us which one we actually mean (eth1/100BASE-TX for the Bridge).
     want = DEVICES[name]["ip"]
     return want if want in ips else ips[0]
 

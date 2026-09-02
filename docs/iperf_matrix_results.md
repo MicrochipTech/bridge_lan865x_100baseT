@@ -2,15 +2,16 @@
 
 Full 12-direction `iperf` matrix from `scripts\iperf_matrix_test.py`, run on
 2026-09-01 against this bench's own bridge.
-Raw, unabridged output (every rate step, every captured device report) is in
-[`iperf_matrix_results.log`](iperf_matrix_results.log).
+Raw, unabridged output — every rate step, every captured device report — is
+written to `docs\iperf_matrix_results.log` by the script itself, on whichever
+machine runs it. That log is not committed; the tables below are the summary.
 
 ## Bench configuration used
 
 | Node | Role | IP | Control |
 |---|---|---|---|
 | PC | test driver + real `iperf2` (`jperf-2.0.2\bin\iperf.exe`) | `192.168.0.100` | local |
-| Bridge | this firmware | `eth0` (T1S) `192.168.0.11`, `eth1` (100BASE-T) `192.168.0.12` | COM8 |
+| Bridge | this firmware | `eth0` (T1S) `192.168.0.11`, `eth1` (100BASE-TX) `192.168.0.12` | COM8 |
 | FollowerA | T1S follower node | `192.168.0.201` | COM10 |
 | FollowerB | T1S follower node | `192.168.0.202` | COM23 |
 
@@ -39,7 +40,7 @@ the first step over the 2% loss threshold).
 
 ## Observations
 
-- **PC ↔ Bridge (100BASE-T only, no T1S hop) is the fastest path**, as
+- **PC ↔ Bridge (100BASE-TX only, no T1S hop) is the fastest path**, as
   expected: UDP up to ~80 Mbit/s, TCP ~11–21 Mbit/s (asymmetric — PC→Bridge
   TCP noticeably outruns Bridge→PC, likely the embedded TCP stack's own
   send-side tuning rather than a bridge issue; not investigated further
@@ -52,7 +53,7 @@ the first step over the 2% loss threshold).
   Mbit/s every other T1S-crossing direction reaches** — the same 10 Mbit/s
   step already shows 5% loss for PC→FollowerA/B, whereas Bridge→Follower and
   Follower→Follower both clear 9.4 Mbit/s at 0% loss. Only extra hop unique
-  to the PC→Follower path is the 100BASE-T leg feeding into the bridge
+  to the PC→Follower path is the 100BASE-TX leg feeding into the bridge
   before the T1S segment; not root-caused here.
 - **`Bridge -> FollowerA`/`Bridge -> FollowerB` TCP originally failed outright
   (0.00 Mbit/s)** in the first run, while the same direction's UDP test
@@ -69,4 +70,5 @@ the first step over the 2% loss threshold).
   **5.85 Mbit/s TCP**, in line with every other T1S-crossing TCP direction,
   with eth0 `err=0` in `stats` afterward (was climbing before the fix).
 
-*Full raw log: [`iperf_matrix_results.log`](iperf_matrix_results.log).*
+*The full raw log is written to `docs\iperf_matrix_results.log` when the
+script runs.*

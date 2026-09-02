@@ -1,4 +1,4 @@
-# Configuring the 10BASE-T1S ↔ 100BASE-T Bridge (tcpip_iperf_lan865x)
+# Configuring the 10BASE-T1S ↔ 100BASE-TX Bridge (tcpip_iperf_lan865x)
 
 Status: **draft, work in progress.** This manual is being built up alongside the bring-up
 work recorded in `docs\session-log.md`. Sections below will be filled in as each part of
@@ -9,7 +9,7 @@ skeleton, not a finished guide.
 
 How to configure this MPLAB Harmony v3 / MCC project (`tcpip_iperf_lan865x`, target
 ATSAME54P20A) as a Layer-2 bridge between a 10BASE-T1S segment (via the LAN865x SPI MAC-PHY)
-and a 100BASE-T segment (via the SAME54's internal GMAC + an external RMII PHY).
+and a 100BASE-TX segment (via the SAME54's internal GMAC + an external RMII PHY).
 
 ## Planned sections
 

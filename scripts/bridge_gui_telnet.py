@@ -2,7 +2,7 @@
 """
 Bridge Status & Configuration GUI (Telnet)
 
-Parallel tool to bridge_gui.py: operates the same T1S/100BASE-T bridge, but over a
+Parallel tool to bridge_gui.py: operates the same T1S/100BASE-TX bridge, but over a
 Telnet connection (TCP/23) instead of the EDBG COM port - bridge parameters,
 LAN8651 registers, IEEE test modes and a terminal, all carried over unchanged.
 Only the connection layer is swapped: TelnetLink (this script) instead of Link
@@ -1533,7 +1533,7 @@ class BridgeGUITelnet:
         help_text = """Bridge Status & Configuration GUI (Telnet)
 Version 1.0
 
-This GUI provides an interface to the T1S/100BASE-T Bridge firmware, over a
+This GUI provides an interface to the T1S/100BASE-TX Bridge firmware, over a
 Telnet connection (TCP/23) instead of the EDBG COM port used by bridge_gui.py.
 
 TABS:

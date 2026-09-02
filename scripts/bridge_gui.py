@@ -2,7 +2,7 @@
 """
 Bridge Status & Configuration GUI
 
-Operates the T1S/100BASE-T bridge over the EDBG COM port (115200 8N1):
+Operates the T1S/100BASE-TX bridge over the EDBG COM port (115200 8N1):
 bridge parameters, LAN8651 registers, IEEE test modes, and a terminal.
 
 Standalone apart from two pip packages: sv-ttk (required, for the theme) and pyserial
@@ -1200,7 +1200,7 @@ class BridgeGUI:
     # (mode, title, description) - description is the "explained in detail" text shown
     # in that mode's own group. Kept here as data, not spread across widget calls, so a
     # fifth mode is one more tuple. Longer background (setup notes, safety) stays in
-    # docs/LAN8651_TEST_MODES.md; this is the summary worth having next to the button.
+    # IEEE 802.3-2022 section 147.5.2; this is the summary worth having next to the button.
     TEST_MODES = [
         (1, "Output Voltage & Timing Jitter",
          "Drives the bus with the IEEE 802.3 §147.5.2 test pattern for amplitude and edge timing.\n"
@@ -1262,7 +1262,7 @@ class BridgeGUI:
         ttk.Label(
             scrollable_frame,
             text="⚠️  Test modes disconnect the T1S link - the bridge is unreachable while one is active.\n"
-                 "Register: T1STSTCTL (0x000308FB), bits 15:13. Background and measurement setup: docs/LAN8651_TEST_MODES.md",
+                 "Register: T1STSTCTL (0x000308FB), bits 15:13. IEEE 802.3-2022 section 147.5.2 transmitter test modes.",
             justify=tk.LEFT, foreground="red"
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=8)
 
@@ -1511,7 +1511,7 @@ class BridgeGUI:
         help_text = """Bridge Status & Configuration GUI
 Version 1.0
 
-This GUI provides an interface to the T1S/100BASE-T Bridge firmware.
+This GUI provides an interface to the T1S/100BASE-TX Bridge firmware.
 
 TABS:
 - Bridge Parameters: Read/write bridge configuration (IP, MAC, PLCA)

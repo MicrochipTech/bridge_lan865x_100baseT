@@ -1,5 +1,5 @@
 /*******************************************************************************
-  eth0 (10BASE-T1S) -> eth1 (100BASE-T) port mirror / SPAN
+  eth0 (10BASE-T1S) -> eth1 (100BASE-TX) port mirror / SPAN
 
   File Name:
     port_mirror.c
@@ -42,7 +42,7 @@
 
 /* Interface indices: source of the mirrored traffic, and where the copies go. */
 #define MIRROR_SRC_IF   0u    /* eth0, the 10BASE-T1S MAC-PHY */
-#define MIRROR_DST_IF   1u    /* eth1, the 100BASE-T GMAC     */
+#define MIRROR_DST_IF   1u    /* eth1, the 100BASE-TX GMAC     */
 
 #define MIRROR_MAX_FRAME  1518u
 

@@ -1,4 +1,4 @@
-# Building a 10BASE-T1S ↔ 100BASE-T Bridge from a Standard LAN865x Project
+# Building a 10BASE-T1S ↔ 100BASE-TX Bridge from a Standard LAN865x Project
 
 **A technical brief on turning a single-interface MPLAB Harmony LAN865x application into a
 transparent Layer-2 bridge using MCC, on the ATSAME54P20A.**
@@ -9,17 +9,17 @@ transparent Layer-2 bridge using MCC, on the ATSAME54P20A.**
 
 This note describes the MCC (MPLAB Code Configurator) procedure for extending a standard,
 single-interface LAN865x TCP/IP application (one 10BASE-T1S network interface, no bridging)
-into a two-port device that bridges 10BASE-T1S traffic to a 100BASE-T segment and back,
+into a two-port device that bridges 10BASE-T1S traffic to a 100BASE-TX segment and back,
 transparently, at Layer 2.
 
 The target hardware is a SAM E54 (ATSAME54P20A) with:
 
 - an on-board **LAN865x** 10BASE-T1S MAC-PHY, connected over SPI, and
-- the SAM E54's internal **GMAC**, driving an external **LAN8742A** 100BASE-T PHY over RMII.
+- the SAM E54's internal **GMAC**, driving an external **LAN8742A** 100BASE-TX PHY over RMII.
 
 The end result is a device with two physical Ethernet ports that behaves as one switch port
 from the perspective of any host on either side — a host on the T1S bus and a host on the
-100BASE-T segment can ping each other directly, without addressing the bridge device itself.
+100BASE-TX segment can ping each other directly, without addressing the bridge device itself.
 
 This document describes *how* to build the configuration. The reasoning behind each
 non-obvious step — including two subtle pitfalls that silently prevent the bridge from
@@ -41,7 +41,7 @@ instances, both marked as bridge members:
 ![Data Link Layer graph: LAN865x and GMAC/LAN8742A each wired to their own NETCONFIG instance](images/tcpip-configurator-datalink-lan8742a.png)
 
 - **`LAN865x` → `Instance 0`** (SPI-attached MAC-PHY) → `NETCONFIG-0` — the 10BASE-T1S side.
-- **`GMAC` → `LAN8742A` PHY** (RMII, MDIO) → `NETCONFIG-1` — the 100BASE-T side.
+- **`GMAC` → `LAN8742A` PHY** (RMII, MDIO) → `NETCONFIG-1` — the 100BASE-TX side.
 
 ## 4. Step-by-step MCC procedure
 
@@ -208,11 +208,11 @@ despite generated traffic is the confirming signature of exactly that problem.
 each other directly — neither one addressing the bridge device's own IP addresses at all:
 
 ```
-# from a host on the 100BASE-T side:
+# from a host on the 100BASE-TX side:
 ping <IP of a device on the T1S bus>
 
 # from a device on the T1S bus:
-ping <IP of the host on the 100BASE-T side>
+ping <IP of the host on the 100BASE-TX side>
 ```
 
 Both directions succeeding, with the bridge's own `bridge stats` showing non-zero, roughly

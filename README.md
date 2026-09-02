@@ -1,6 +1,6 @@
-# tcpip_iperf_lan865x — T1S ↔ 100BASE-T Bridge
+# tcpip_iperf_lan865x — T1S ↔ 100BASE-TX Bridge
 
-A **10BASE-T1S ↔ 100BASE-T Layer-2 bridge** firmware for the ATSAME54P20A. It
+A **10BASE-T1S ↔ 100BASE-TX Layer-2 bridge** firmware for the ATSAME54P20A. It
 bridges a 10BASE-T1S segment onto ordinary Fast Ethernet, so any device on
 the T1S side becomes reachable — and reachable *from* — a normal IP network,
 exactly as if it were plugged into a regular Ethernet switch. On-board
@@ -8,7 +8,7 @@ diagnostics cover the bridge itself (packet mirroring, register access, PLCA
 control, a raw-Ethernet loopback test, a TCP echo test server, a built-in
 `iperf` throughput tester) plus **persistent network/PLCA configuration** on
 an Emulated EEPROM (§6.2), all reachable over **two independent consoles at
-once** — the EDBG serial port and a Telnet server on the 100BASE-T side (§10).
+once** — the EDBG serial port and a Telnet server on the 100BASE-TX side (§10).
 
 The firmware is built from a small set of self-contained modules: `env.c`
 (persistent configuration on an emulated EEPROM), `lan865x_diag.c` (registers,
@@ -45,7 +45,7 @@ The board sits between two worlds:
 
 ```
    PC / lab network / internet     Bridge (this firmware)            T1S bus
-   100BASE-T (RJ45)          ATSAME54P20A + LAN865x + LAN8742A   10BASE-T1S (2-wire)
+   100BASE-TX (RJ45)         ATSAME54P20A + LAN865x + LAN8742A   10BASE-T1S (2-wire)
    ┌──────────────┐  100M    ┌───────────────────────────┐  T1S   ┌──────────────┐
    │  Wireshark   │◄────────►│ eth1 (GMAC)   eth0 (LAN865x)│◄──────►│  any T1S     │
    │  ping/telnet │.12/.11   │   └── MAC bridge (L2) ──┘   │ PLCA   │  node(s)     │
@@ -55,10 +55,10 @@ The board sits between two worlds:
 It does two jobs:
 
 **a) Transparent L2 bridge.** The two interfaces — `eth0` (the T1S MAC-PHY)
-and `eth1` (100BASE-T) — are joined by the Harmony **MAC bridge**, so
-traffic from the 100BASE-T side (ARP, ICMP/ping, ordinary IP traffic) flows
+and `eth1` (100BASE-TX) — are joined by the Harmony **MAC bridge**, so
+traffic from the 100BASE-TX side (ARP, ICMP/ping, ordinary IP traffic) flows
 through to any node on the T1S segment and back, with MAC learning (FDB).
-From a PC on the 100BASE-T side you can simply `ping <t1s-node-ip>` and reach
+From a PC on the 100BASE-TX side you can simply `ping <t1s-node-ip>` and reach
 it *through* the bridge as if it were on the local Ethernet. The bridge does
 **not** forward manually in application code — the Harmony MAC bridge
 handles all L2 forwarding in both directions.
@@ -78,7 +78,7 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
 
 ### Bridging (core function)
 
-- Transparent 10BASE-T1S ↔ 100BASE-T Layer-2 bridge on the ATSAME54P20A:
+- Transparent 10BASE-T1S ↔ 100BASE-TX Layer-2 bridge on the ATSAME54P20A:
   `eth0` (LAN8651 T1S MAC-PHY, SPI) and `eth1` (GMAC + LAN8742A, RMII) joined
   into one L2 segment.
 - Hardware/stack-level forwarding via the Harmony MAC bridge, with MAC
@@ -200,7 +200,7 @@ to land.
 | Part | What it is | Microchip order number |
 |---|---|---|
 | **MCU host** (Cortex-M4F, runs this firmware) | SAM E54 Curiosity (Ultra) board | **DM320210** |
-| **100BASE-T PHY** for `eth1` (plugs into the board's PHY daughter-card header) | LAN8740A PHY Daughter Board | **AC320004-3** |
+| **100BASE-TX PHY** for `eth1` (plugs into the board's PHY daughter-card header) | LAN8740A PHY Daughter Board | **AC320004-3** |
 | **10BASE-T1S MAC-PHY** for `eth0` (SPI ↔ two-wire bus) | MikroElektronika Two-Wire ETH Click (LAN8651) | **MIKROE-5543** |
 
 > **Other PHY/switch daughter boards fit the same connector but need a
@@ -231,7 +231,7 @@ to land.
 | Interface | Role | IP | Mask | PLCA |
 |---|---|---|---|---|
 | `eth0` | T1S (LAN865x) | **192.168.0.11** | /24 | node id **5**, node count **8** |
-| `eth1` | 100BASE-T (GMAC+LAN8742A) | **192.168.0.12** | /24 | — |
+| `eth1` | 100BASE-TX (GMAC+LAN8742A) | **192.168.0.12** | /24 | — |
 | T1S node (example) | *any device* | e.g. `192.168.0.54` | /24 | follower |
 
 Both bridge interfaces share one `192.168.0.0/24` subnet — the MAC bridge
@@ -270,7 +270,7 @@ sudo ip addr add 192.168.0.220/24 dev eth0     # adapter name from `ip link`
 Verify with two pings, each with its own diagnostic meaning:
 
 ```sh
-ping 192.168.0.12     # eth1 (GMAC/LAN8742A) answers -> cable and 100BASE-T link are up
+ping 192.168.0.12     # eth1 (GMAC/LAN8742A) answers -> cable and 100BASE-TX link are up
 ping 192.168.0.11     # eth0 (LAN865x) answers -> the bridge really forwards to the T1S side
 ```
 
@@ -279,7 +279,7 @@ ping 192.168.0.11     # eth0 (LAN865x) answers -> the bridge really forwards to 
 1. **Debugger + console:** one USB cable from the PC to the SAM E54 board's
    embedded-debugger USB port — both the programmer and the virtual COM port
    for the serial CLI (**115200 8N1**).
-2. **100BASE-T:** the RJ45 on the LAN8742A side ↔ the PC's Ethernet adapter.
+2. **100BASE-TX:** the RJ45 on the LAN8742A side ↔ the PC's Ethernet adapter.
 3. **T1S:** the two-wire bus from the LAN865x Click to whatever node(s) sit
    on the T1S segment.
 4. **Telnet (optional, no extra cable):** once `eth1` is up, the same CLI is
@@ -301,7 +301,7 @@ cooperative superloop (`SYS_Tasks()`); no RTOS, no threads, no locks.
                        ├──────────────────────────────────────────────┤
    T1S bus  ◄──────────┤ eth0: DRV_LAN865X ┐                          │
                        │                   ├─ TCPIP MAC bridge (L2) ─┐ │
-   100BASE-T ◄─────────┤ eth1: GMAC+LAN8742A┘  + Harmony TCP/IP stack │ │
+   100BASE-TX ◄─────────┤ eth1: GMAC+LAN8742A┘  + Harmony TCP/IP stack │ │
                        ├──────────────────────────────────────────────┤
                        │ Emulated EEPROM (last 16 KB flash) — env.c   │
                        └──────────────────────────────────────────────┘
@@ -312,7 +312,7 @@ cooperative superloop (`SYS_Tasks()`); no RTOS, no threads, no locks.
 - `TCPIP_STACK_USE_MAC_BRIDGE` is enabled with both interfaces added
   (`TCPIP_NETWORK_MACBRIDGE_ADD_IDXn`, an MCC per-interface checkbox — see
   `docs/how-to-bridge.md` §4.5). **The MAC bridge does all L2 forwarding**
-  between T1S and 100BASE-T — there is no manual forwarding code in the
+  between T1S and 100BASE-TX — there is no manual forwarding code in the
   application.
 
 ### Application modules
@@ -558,7 +558,7 @@ change in the MCC project instead).
 | eth0 (T1S) IP | `TCPIP_NETWORK_DEFAULT_IP_ADDRESS_IDX0` | `"192.168.0.11"` |
 | eth0 gateway | `TCPIP_NETWORK_DEFAULT_GATEWAY_IDX0` | `"192.168.0.1"` |
 | eth0 MAC | `TCPIP_NETWORK_DEFAULT_MAC_ADDR_IDX0` | `"00:04:25:1C:A0:02"` (fallback only — `env` derives the real per-board MAC from the SAME54 serial number) |
-| eth1 (100BASE-T) IP | `TCPIP_NETWORK_DEFAULT_IP_ADDRESS_IDX1` | `"192.168.0.12"` |
+| eth1 (100BASE-TX) IP | `TCPIP_NETWORK_DEFAULT_IP_ADDRESS_IDX1` | `"192.168.0.12"` |
 | eth1 gateway | `TCPIP_NETWORK_DEFAULT_GATEWAY_IDX1` | `"192.168.0..1"` (sic — see the quirk note in [§3](#3-hardware-setup)) |
 | eth1 MAC | `TCPIP_NETWORK_DEFAULT_MAC_ADDR_IDX1` | `"00:04:25:1C:A0:03"` (fallback only, see above) |
 | PLCA node id | `DRV_LAN865X_PLCA_NODE_ID_IDX0` | `5` |
@@ -637,14 +637,15 @@ Both clone frames to `eth1`, but with a different filter:
 | Command | RX filter | TX side |
 |---|---|---|
 | `mirror [0\|1]` | only frames addressed **to this bridge** (dst MAC == eth0 MAC) — the endpoint's replies | this bridge's own outgoing frames (src MAC == eth0 MAC), so a firmware-originated `ping` shows both request and reply |
-| `sniffer [0\|1]` | **every** frame eth0 receives, including traffic between two other T1S nodes that never involves this bridge at all | same as `mirror` — traffic between two other nodes never touches this bridge's own TX path to begin with |
+| `sniffer [0\|1]` | **every** frame eth0 receives, including traffic between two other T1S nodes that never involves this bridge at all | none — the TX copy is driven by `mirror` alone, and `sniffer` disables the T1S transmitter anyway |
 
 `mirror`'s narrower RX filter exists specifically to keep a bridge-focused
 capture duplicate-free: a PC→endpoint frame the bridge merely *forwards*
 already reaches the PC natively via the normal bridge path, so mirroring it
 again would just be noise. `sniffer` skips that filter when you want to see
-the whole bus, not just this bridge's own conversations. Both can be on at
-once; `sniffer` is simply the broader of the two.
+the whole bus, not just this bridge's own conversations. The two are
+alternatives, not a combination: the firmware refuses to enable one while the
+other is active, naming the command to switch off first.
 
 ### Using it
 

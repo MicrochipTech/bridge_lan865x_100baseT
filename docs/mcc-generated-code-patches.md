@@ -39,7 +39,7 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 6 | `driver\lan865x\src\dynamic\drv_lan865x_api.c` + `library\tcpip\src\telnet.c` — `#include <stdarg.h>` | Build fails outright (`implicit declaration of function 'va_start'`) | **Critical — build blocker**, but easy to spot and re-add |
 | 7 | `system\command\src\sys_command.c` — CR NUL line-ending handling | Every Telnet command after the first one in a session silently fails ("Please type in a command") | High — correctness, Telnet-only |
 | 8 | `library\tcpip\src\telnet.c` — `F_Telnet_MSG()` real backpressure | Large command output over Telnet (e.g. `dump`, `netinfo`) truncates instead of completing | Medium — correctness, Telnet-only |
-| 9 | `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction | T1S→100BASE-T TCP forwarding stalls after the first near-MTU-size segment; legitimate large frames silently rejected (`failMtu`) | High — correctness, forwarding-path |
+| 9 | `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction | T1S→100BASE-TX TCP forwarding stalls after the first near-MTU-size segment; legitimate large frames silently rejected (`failMtu`) | High — correctness, forwarding-path |
 | 10 | `driver\lan865x\src\dynamic\tc6\tc6-conf.h` — `TC6_TX_ETH_MAX_SEGMENTS` 1u → 3u | Any TCP payload the bridge's own stack sends (not merely forwards) out `eth0` silently fails, hitting the TCPIP Stack Assert | High — correctness, bridge-originated TCP |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
@@ -534,7 +534,7 @@ that the reverted first attempt also changed — with `pktLen` now correct at
 the source, the existing comparison and existing branch structure need no
 further adjustment.
 
-**If lost:** T1S→100BASE-T TCP transfers through the bridge stall after the
+**If lost:** T1S→100BASE-TX TCP transfers through the bridge stall after the
 first large segment again, and `bridge stats` will show a growing `failMtu`
 counter under any traffic with segments near the interface MTU.
 **Root-caused and fixed 2026-08-31** (see `docs/session-log.md`) — verified

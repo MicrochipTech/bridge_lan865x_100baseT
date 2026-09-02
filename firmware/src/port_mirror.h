@@ -1,12 +1,12 @@
 /*******************************************************************************
-  eth0 (10BASE-T1S) -> eth1 (100BASE-T) port mirror / SPAN
+  eth0 (10BASE-T1S) -> eth1 (100BASE-TX) port mirror / SPAN
 
   File Name:
     port_mirror.h
 
   Summary:
     Clones the bridge's own T1S conversation onto eth1 so a PC running Wireshark
-    on the 100BASE-T side can capture the two-wire bus.
+    on the 100BASE-TX side can capture the two-wire bus.
 
   Description:
     A 10BASE-T1S segment cannot be tapped with an ordinary NIC, and the MAC
