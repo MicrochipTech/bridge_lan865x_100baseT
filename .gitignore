@@ -11,3 +11,8 @@ json/term_ports.json
 # Advisory record of the intended XC32 version (see scripts\setup_compiler.py) -
 # machine-specific, not read by build.bat itself.
 setup_compiler.config
+
+# AI-assistant working instructions - personal workflow/machine-specific
+# (local screenshot folder, session-log habit), not project documentation.
+# The actual project knowledge lives in docs\ and is tracked normally.
+CLAUDE.md

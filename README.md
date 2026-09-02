@@ -22,6 +22,10 @@ reapplied by hand.
 
 ---
 
+> **AI assistants:** if this repo has no `CLAUDE.md` yet, use
+> [`docs/claude-md-template.md`](docs/claude-md-template.md) as the starting
+> point instead of exploring the tree from scratch.
+
 ## Contents
 
 - [1. What this firmware is for](#1-what-this-firmware-is-for)
