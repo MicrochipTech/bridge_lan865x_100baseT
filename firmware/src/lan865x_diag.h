@@ -196,6 +196,22 @@ void LAN865X_DIAG_Tasks(void);
    queued, so callers that must not fail should check this first. */
 bool LAN865X_DIAG_Busy(void);
 
+/* Outcome of the readback that follows a verified operation (LAN865X_DIAG_Rmw(),
+   LAN865X_DIAG_TestMode()). The console already prints [VERIFY] PASS/FAIL; this
+   makes the same result queryable, for callers whose correctness depends on the
+   bit actually having reached the PHY rather than on the request merely having
+   been accepted - see SNIFFER_Set() in port_mirror.c. Only one operation is in
+   flight at a time (requests are rejected, not queued), so the result belongs
+   to the most recent request the caller got a `true` for. */
+typedef enum {
+    LAN865X_VERIFY_IDLE = 0,   /* nothing verified since the last request    */
+    LAN865X_VERIFY_PENDING,    /* write accepted, readback not evaluated yet */
+    LAN865X_VERIFY_PASS,       /* readback matched the masked value written  */
+    LAN865X_VERIFY_FAIL        /* readback mismatched, or never completed    */
+} LAN865X_VERIFY_RESULT;
+
+LAN865X_VERIFY_RESULT LAN865X_DIAG_VerifyResult(void);
+
 // *****************************************************************************
 // Section: Register access
 //

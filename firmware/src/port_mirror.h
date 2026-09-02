@@ -99,6 +99,19 @@ void MIRROR_Set(bool enable);
 bool SNIFFER_IsEnabled(void);
 void SNIFFER_Set(bool enable);
 
+/* true once a readback has PROVEN that T1SPMACTL.TXD matches the current
+   sniffer mode. False while the write is still being retried, and false for
+   good if it could not be placed - see the SNIFFER_TXD_* block in
+   port_mirror.c. Anything that depends on the bridge being electrically silent
+   must test this, not SNIFFER_IsEnabled(), which only reports what was asked
+   for. */
+bool SNIFFER_TxdConfirmed(void);
+
+/* Service the pending TXD write: retry it, evaluate its readback, time out.
+   Call from the main loop AFTER LAN865X_DIAG_Tasks(), whose readback result
+   this consumes. */
+void MIRROR_Tasks(void);
+
 /* RX path: call for every frame received on eth0, from the interface's packet
    handler. Does nothing when mirroring is off, and applies the own-MAC filter
    itself - the caller does not need to check anything. */

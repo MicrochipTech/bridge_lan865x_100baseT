@@ -794,6 +794,11 @@ void APP_Tasks ( void )
             /* Register access / test modes / PLCA - see lan865x_diag.c */
             LAN865X_DIAG_Tasks();
 
+            /* Sniffer's pending T1SPMACTL.TXD write: retries it and evaluates
+             * the readback LAN865X_DIAG_Tasks() just produced, so it has to run
+             * after it. See the SNIFFER_TXD_* block in port_mirror.c. */
+            MIRROR_Tasks();
+
             /* TCP echo test server - see testserver.c */
             TESTSERVER_Tasks();
 

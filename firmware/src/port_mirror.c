@@ -118,6 +118,74 @@ void MIRROR_Set(bool enable)  { s_mirror_on = enable; }
 
 bool SNIFFER_IsEnabled(void)  { return s_sniffer_on; }
 
+/* --- sniffer: making the transmitter state provable, not merely requested ---
+ * sniffer's entire purpose is electrical silence on the T1S bus, and that rests
+ * on a single bit: T1SPMACTL.TXD. LAN865X_DIAG_Rmw() is asynchronous and
+ * REJECTS a request outright while the diag state machine is busy (one slot, no
+ * queue). The original fire-and-forget call therefore had exactly the failure
+ * mode a passive tap must not have: 'sniffer 1' answered ON while the
+ * transmitter kept running, and nothing on the console said otherwise.
+ *
+ * The write is now retried from MIRROR_Tasks() until the diag module accepts it
+ * AND its readback confirms the bit, or until SNIFFER_TXD_TIMEOUT_MS has passed
+ * - in which case it reports a hard error instead of staying silent about it.
+ * s_txd_confirmed is what SNIFFER_TxdConfirmed() exposes and what the 'sniffer'
+ * command prints; s_sniffer_on on its own only ever meant "requested". */
+#define SNIFFER_TXD_TIMEOUT_MS  3000u
+
+static bool     s_txd_want      = false; /* TXD state the requested mode needs        */
+static bool     s_txd_req       = false; /* a write is outstanding (retry or awaited) */
+static bool     s_txd_issued    = false; /* Rmw accepted, its readback still pending  */
+static bool     s_txd_confirmed = true;  /* readback proved it. True at boot: TXD is
+                                            clear out of reset and sniffer starts off */
+static uint64_t s_txd_deadline  = 0u;
+static SYS_CMD_DEVICE_NODE *s_sniffer_pCmdIO = NULL; /* console that asked, so the
+                                            deferred result goes back to it */
+
+static void sniffer_txd_try(void)
+{
+    if (LAN865X_DIAG_Busy()) return;                  /* retry next iteration */
+    if (LAN865X_DIAG_Rmw(LAN865X_T1SPMACTL, LAN865X_PMACTL_TXD,
+                         s_txd_want ? LAN865X_PMACTL_TXD : 0u)) {
+        s_txd_issued = true;
+    }
+}
+
+bool SNIFFER_TxdConfirmed(void) { return s_txd_confirmed; }
+
+void MIRROR_Tasks(void)
+{
+    if (!s_txd_req) return;
+
+    if (s_txd_issued) {
+        LAN865X_VERIFY_RESULT r = LAN865X_DIAG_VerifyResult();
+        if (r == LAN865X_VERIFY_PASS) {
+            s_txd_confirmed = true;
+            s_txd_req       = false;
+            CMD_PRINT_OR_CONSOLE(s_sniffer_pCmdIO,
+                "[SNIFFER] T1S transmitter %s - CONFIRMED by readback of T1SPMACTL.TXD\n\r",
+                s_txd_want ? "disabled" : "enabled");
+            return;
+        }
+        if (r != LAN865X_VERIFY_FAIL) return;          /* still pending - wait */
+        s_txd_issued = false;                          /* failed - retry below */
+    }
+
+    if (SYS_TIME_Counter64Get() >= s_txd_deadline) {
+        s_txd_req = false;
+        CMD_PRINT_OR_CONSOLE(s_sniffer_pCmdIO,
+            "[SNIFFER] ERROR: could not %s the T1S transmitter (T1SPMACTL.TXD).\n\r",
+            s_txd_want ? "disable" : "enable");
+        CMD_PRINT_OR_CONSOLE(s_sniffer_pCmdIO,
+            "          The bridge is NOT known to be silent - check with 'lan_read 0x000308F9'\n\r");
+        CMD_PRINT_OR_CONSOLE(s_sniffer_pCmdIO,
+            "          (TXD is bit 14, mask 0x00004000) and repeat the command.\n\r");
+        return;
+    }
+
+    sniffer_txd_try();
+}
+
 /* Passive tap: sniffer also disables the LAN8651's own transmitter
  * (T1SPMACTL.TXD) while it is on, so the bridge never talks on the bus
  * itself - invisible to the other nodes, listen-only. TXD needs no PMA
@@ -130,8 +198,14 @@ bool SNIFFER_IsEnabled(void)  { return s_sniffer_on; }
  * still in progress") just leaves TXD as it was, same as any other
  * lan865x_diag command. */
 void SNIFFER_Set(bool enable) {
-    s_sniffer_on = enable;
-    (void) LAN865X_DIAG_Rmw(LAN865X_T1SPMACTL, LAN865X_PMACTL_TXD, enable ? LAN865X_PMACTL_TXD : 0u);
+    s_sniffer_on    = enable;      /* RX mirroring may follow the request at once */
+    s_txd_want      = enable;
+    s_txd_req       = true;        /* ... but the transmitter bit has to be proven */
+    s_txd_issued    = false;
+    s_txd_confirmed = false;
+    s_txd_deadline  = SYS_TIME_Counter64Get()
+                    + ((uint64_t)SYS_TIME_FrequencyGet() * (uint64_t)SNIFFER_TXD_TIMEOUT_MS) / 1000ULL;
+    sniffer_txd_try();             /* first attempt now, the rest in MIRROR_Tasks() */
 }
 
 /* Recycle a sent (or never-submitted) pool packet - never TCPIP_PKT_PacketFree()
@@ -311,7 +385,17 @@ static void mirror_print_dbg_counters(SYS_CMD_DEVICE_NODE* pCmdIO) {
  * CLI command). No argument shows the current state. */
 static void cmd_mirror(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
     if (argc >= 2) {
-        s_mirror_on = (strtoul(argv[1], NULL, 0) != 0u);
+        bool want = (strtoul(argv[1], NULL, 0) != 0u);
+        /* mirror and sniffer are alternative capture modes, never a combination:
+         * sniffer is the broader of the two on RX and disables the T1S
+         * transmitter, which makes mirror's TX half meaningless. Refuse instead
+         * of silently producing a mode nobody documented. */
+        if (want && s_sniffer_on) {
+            CMD_PRINT(pCmdIO, "Refused: sniffer is ON. mirror and sniffer are alternative capture modes.\n\r");
+            CMD_PRINT(pCmdIO, "Run 'sniffer 0' first, then 'mirror 1'.\n\r");
+            return;
+        }
+        s_mirror_on = want;
     }
     CMD_PRINT(pCmdIO, "eth0(T1S)->eth1 mirror: %s\n\r", s_mirror_on ? "ON" : "OFF");
     if (s_mirror_on) {
@@ -329,9 +413,23 @@ static void cmd_mirror(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
  * working meanwhile. No argument shows the current state. */
 static void cmd_sniffer(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
     if (argc >= 2) {
-        SNIFFER_Set(strtoul(argv[1], NULL, 0) != 0u);
+        bool want = (strtoul(argv[1], NULL, 0) != 0u);
+        if (want && s_mirror_on) {                 /* see the note in cmd_mirror() */
+            CMD_PRINT(pCmdIO, "Refused: mirror is ON. mirror and sniffer are alternative capture modes.\n\r");
+            CMD_PRINT(pCmdIO, "Run 'mirror 0' first, then 'sniffer 1'.\n\r");
+            return;
+        }
+        s_sniffer_pCmdIO = pCmdIO;   /* the deferred confirmation goes back here */
+        SNIFFER_Set(want);
     }
     CMD_PRINT(pCmdIO, "eth0(T1S)->eth1 sniffer: %s\n\r", s_sniffer_on ? "ON" : "OFF");
+    /* The mode flag alone says nothing about the bus - report what the readback
+     * actually proved about T1SPMACTL.TXD. */
+    CMD_PRINT(pCmdIO, "  T1S transmitter: %s\n\r",
+              s_txd_req       ? "not confirmed yet - verifying, watch for [SNIFFER]"
+            : s_txd_confirmed ? (s_sniffer_on ? "disabled (confirmed by readback)"
+                                              : "enabled (confirmed by readback)")
+                              : "NOT CONFIRMED - check with 'lan_read 0x000308F9'");
     if (s_sniffer_on) {
         CMD_PRINT(pCmdIO, "  Capture on the PC (eth1) in Wireshark to see ALL T1S bus traffic,\n\r");
         CMD_PRINT(pCmdIO, "  including frames between other nodes that do not involve this bridge.\n\r");

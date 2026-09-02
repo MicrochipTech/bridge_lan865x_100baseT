@@ -83,6 +83,7 @@ static SYS_CMD_DEVICE_NODE *s_diag_pCmdIO = NULL;
 /* A write on its own only proves the TC6 transaction ran, not that the register kept the
  * value. These let a completed write chain into a verifying read of the same address, so
  * every mode change reports its own readback. Cleared once the verdict is printed. */
+static LAN865X_VERIFY_RESULT s_verify_result = LAN865X_VERIFY_IDLE; /* queryable [VERIFY] outcome */
 static bool     s_verify_armed   = false;   /* after this write, read the addr back  */
 static bool     s_verify_pending = false;   /* the following read is that readback   */
 static uint32_t s_verify_expect  = 0u;
@@ -408,6 +409,10 @@ bool LAN865X_DIAG_Write(uint32_t addr, uint32_t value) {
     return true;
 }
 
+LAN865X_VERIFY_RESULT LAN865X_DIAG_VerifyResult(void) {
+    return s_verify_result;
+}
+
 bool LAN865X_DIAG_Rmw(uint32_t addr, uint32_t mask, uint32_t value) {
     if (s_state != LAN_IDLE) {
         return false;
@@ -422,6 +427,7 @@ bool LAN865X_DIAG_Rmw(uint32_t addr, uint32_t mask, uint32_t value) {
     s_verify_mask    = mask;
     s_verify_armed   = true;
     s_verify_pending = false;
+    s_verify_result  = LAN865X_VERIFY_PENDING;
     s_op_complete    = false;
     s_op_initiated   = false;
     s_state          = LAN_WAIT_RMW;
@@ -696,10 +702,12 @@ void LAN865X_DIAG_Tasks(void) {
                         uint32_t got  = s_read_value    & s_verify_mask;
                         uint32_t want = s_verify_expect & s_verify_mask;
                         if (got == want) {
+                            s_verify_result = LAN865X_VERIFY_PASS;
                             CMD_PRINT_OR_CONSOLE(s_diag_pCmdIO, "[VERIFY] PASS addr=0x%08X masked=0x%08X (mask 0x%08X)\n\r",
                                               (unsigned int)s_addr, (unsigned int)got,
                                               (unsigned int)s_verify_mask);
                         } else {
+                            s_verify_result = LAN865X_VERIFY_FAIL;
                             CMD_PRINT_OR_CONSOLE(s_diag_pCmdIO, "[VERIFY] FAIL addr=0x%08X expected=0x%08X got=0x%08X (mask 0x%08X)\n\r",
                                               (unsigned int)s_addr, (unsigned int)want,
                                               (unsigned int)got, (unsigned int)s_verify_mask);
@@ -716,6 +724,7 @@ void LAN865X_DIAG_Tasks(void) {
                 } else {
                     CMD_PRINT_OR_CONSOLE(s_diag_pCmdIO, "LAN865X Read failed for addr=0x%08X\n\r", (unsigned int)s_addr);
                     if (s_verify_pending) {
+                        s_verify_result = LAN865X_VERIFY_FAIL;
                         CMD_PRINT_OR_CONSOLE(s_diag_pCmdIO, "[VERIFY] FAIL addr=0x%08X - readback did not complete\n\r",
                                           (unsigned int)s_addr);
                         s_verify_pending = false;
