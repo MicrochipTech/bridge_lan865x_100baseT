@@ -344,9 +344,12 @@ cooperative superloop (`SYS_Tasks()`); no RTOS, no threads, no locks.
 
 ### CLI commands
 
-Six command groups; type the command name directly (no group prefix
-needed). Full descriptions are each command's own `help`/`<group>help`
-output on the device — this is the reference.
+Six command groups of this project's own, plus the `iperf` and `tcpip` groups
+the Harmony stack registers; type the command name directly, no group prefix
+needed. The tables below are a summary —
+[`docs/cli-reference.md`](docs/cli-reference.md) documents every command with
+its arguments, real output and caveats, and `help` on the device lists
+whatever the running image actually offers.
 
 **`Test` group** (`app.c`):
 

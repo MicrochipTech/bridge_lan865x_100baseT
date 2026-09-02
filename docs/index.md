@@ -12,7 +12,8 @@ project was built, why particular decisions were made, and what was measured.
 
 | If you want to … | Read |
 |---|---|
-| use the firmware — features, build, flash, CLI, configuration | [`../README.md`](../README.md) |
+| use the firmware — features, build, flash, configuration | [`../README.md`](../README.md) |
+| look up a CLI command: arguments, output, what it does not do | [`cli-reference.md`](cli-reference.md) |
 | turn a single-interface LAN865x project into a bridge yourself, in MCC | [`how-to-bridge.md`](how-to-bridge.md) |
 | change or extend the code without breaking it on the next MCC run | [`development-notes.md`](development-notes.md) |
 | understand or re-apply a hand-patch to generated code | [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md), then [`../patches/README.md`](../patches/README.md) |
@@ -24,6 +25,14 @@ project was built, why particular decisions were made, and what was measured.
 ---
 
 ## The documents
+
+### [`cli-reference.md`](cli-reference.md) — every CLI command
+*The reference for operating a running board.* All 30 commands this firmware
+registers, in their six groups, plus the `iperf` and `tcpip` groups the Harmony
+stack adds: syntax, arguments, captured example output, and the caveats that
+matter — which settings are volatile and which persist, why a command
+returning promptly is not proof the hardware took it, and where a capture is
+not byte-complete. Ends with a table of what does and does not survive a reset.
 
 ### [`how-to-bridge.md`](how-to-bridge.md) — MCC procedure for the bridge
 *245 lines.* A technical brief on turning a standard single-interface
