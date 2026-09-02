@@ -431,12 +431,18 @@ needed just to program the board).
 
 ### 5.1 Tool prerequisites (per machine)
 
-| Requirement | Notes |
-|---|---|
-| **MPLAB X IDE** | must be **installed** (its `make` and `prjMakefilesGenerator` are used) and supplies the SAME54_DFP device pack — never has to stay open |
-| **MPLAB XC32** | see `setup_compiler.config` in the sister project's convention; this project resolves the compiler the same way `build.bat` finds `make.exe` — no separate compiler-selection step here (see §5.2) |
-| **Python 3.9+** | `pyserial`/`pyocd`/`sv-ttk`, installed by `setup.bat` into this project's own `.venv` |
-| **Terminal** | the board's EDBG virtual COM port, 115200 8N1, **or** `telnet 192.168.0.12` once the board is up (§10) |
+**Flashing needs neither MPLAB X nor XC32.** The working firmware is committed
+as `release\bridge_lan865x_100baseT.hex`, so a fresh clone can go straight to
+`setup.bat` → `flash.bat` → `run_gui.bat` with nothing but Python and the
+board's USB debugger. A compiler is only needed to change the firmware.
+
+| Requirement | Needed for | Notes |
+|---|---|---|
+| **Python 3.9+** | both | `pyserial`/`pyocd`/`sv-ttk`, installed by `setup.bat` into this project's own `.venv` — never the machine's global Python |
+| **EDBG probe over USB** | both | the SAM E54 Curiosity's on-board debugger; the same cable carries the CLI's virtual COM port |
+| **MPLAB X IDE** | building only | its `make` and `prjMakefilesGenerator` are used; never has to stay open. It normally also supplies the SAME54_DFP pack, but is **not** required for that: if no local install ever provided one, `install.bat --install` downloads the pinned version from Microchip's public pack server |
+| **MPLAB XC32** | building only | the compiler `build.bat` drives through MPLAB X's `make`. `setup.bat`'s compiler-selection step (§5.2) only *records* which version you intend to use — `build.bat` does not read `setup_compiler.config` for the actual build |
+| **Terminal** | both | the board's EDBG virtual COM port, 115200 8N1, **or** `telnet 192.168.0.12` once the board is up (§10) |
 
 ### 5.2 One-time setup after cloning
 
@@ -444,15 +450,22 @@ needed just to program the board).
 setup.bat
 ```
 
-Runs four independent steps (a failure in one is reported but does not
-abort the rest): a Python virtual environment at `.venv\` with
-`pyserial`/`pyocd`/`sv-ttk` installed into it (`batch\setup_venv.bat` —
-never the machine's global Python), pyOCD + probe/pack check
-(`install.bat --install`), the SAME54_DFP VS Code debug fix
-(`scripts\setup_debug.py`), and the project Makefiles (`batch\genmk.bat`).
-There is no compiler-selection step here, unlike the sister project's
-`setup.bat` — its purpose there is feeding a `build_summary.py` post-build
-step this project doesn't have.
+Connect the board over its USB debugger port **before** running this, so the
+probe check can see it. Five independent steps run; a failure in one is
+reported but does not abort the rest:
+
+| Step | Does | Script |
+|---|---|---|
+| `[1/5]` | Python virtual environment at `.venv\` with `pyserial`/`pyocd`/`sv-ttk` | `batch\setup_venv.bat` |
+| `[2/5]` | XC32 compiler selection — **advisory only**, it records which version you intend to use; `build.bat` does not read the result | `scripts\setup_compiler.py` |
+| `[3/5]` | Flasher prerequisites: pyOCD, probe detection, SAME54_DFP pack (downloaded if no local one exists) | `install.bat --install` |
+| `[4/5]` | SAME54_DFP VS Code debug fix | `scripts\setup_debug.py` |
+| `[5/5]` | MPLAB X project Makefiles | `batch\genmk.bat` |
+
+**If you only want to flash, expect warnings from steps 2 and 5 — they are
+harmless.** Those are the two steps that look for XC32 and MPLAB X. Each
+prints a warning if its tool is missing, `setup.bat` still finishes, and
+`flash.bat` works regardless: it needs only pyOCD and the EDBG probe.
 
 **No IDE session is strictly needed for the Makefiles.** A fresh checkout
 has no `nbproject\Makefile-*.mk` fragments (gitignored — they hold absolute
@@ -464,10 +477,22 @@ fragments are missing.
 ### 5.3 Build and flash
 
 ```bat
-build.bat            :: incremental build (build.bat rebuild = clean, build.bat clean)
-flash.bat             :: program the board via pyOCD and release it from reset
-flash.bat --list      :: list connected probes
+build.bat                    :: incremental build (build.bat rebuild = clean, build.bat clean)
+flash.bat                     :: program the board via pyOCD and release it from reset
+flash.bat --list              :: list connected probes
+flash.bat --probe <serial>    :: pick a probe for this run only
+install.bat --select          :: change which board flash.bat programs from now on
 ```
+
+**More than one board connected?** `flash.bat` passes the probe serial recorded
+in `json\bench.json` (chosen during `setup.bat`) straight to pyOCD. With no
+recorded choice, pyOCD picks the probe itself when exactly one board is
+connected and refuses when several are — that refusal is the usual symptom on a
+multi-board bench. `flash.bat --list` shows the connected probes with their
+serials, `--probe <serial>` overrides the recorded choice for one run, and
+`install.bat --select` records a new default. A missing or broken
+`json\bench.json` never blocks a flash; the file is gitignored, being per-bench
+and meaningless on another machine.
 
 Like the sister project, `build.bat` copies the resulting HEX into a
 tracked **`release\bridge_lan865x_100baseT.hex`** after every successful
