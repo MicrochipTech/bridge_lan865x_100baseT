@@ -769,6 +769,23 @@ void APP_Tasks ( void )
             TCPIP_STACK_PacketHandlerRegister(eth0_net_hd, pktEth0Handler, MyEth0HandlerParam);
             TCPIP_NET_HANDLE eth1_net_hd = TCPIP_STACK_IndexToNet(1);
             TCPIP_STACK_PacketHandlerRegister(eth1_net_hd, pktEth1Handler, MyEth1HandlerParam);
+
+            /* Say plainly which interfaces actually came up. The stack already
+             * prints "DRV PHY init failed: -1" when a PHY is not physically
+             * there, but that says nothing about what the board can still do.
+             * With the tcpip_manager power-state fix, a missing PHY no longer
+             * aborts the whole stack - the board keeps running on whatever
+             * interface survived, and this line is what tells the operator so. */
+            {
+                bool eth0_up = TCPIP_STACK_NetIsUp(eth0_net_hd);
+                bool eth1_up = TCPIP_STACK_NetIsUp(eth1_net_hd);
+                SYS_CONSOLE_PRINT("eth0 (10BASE-T1S) : %s\n\r", eth0_up ? "up" : "NOT AVAILABLE");
+                SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : %s\n\r", eth1_up ? "up" : "NOT AVAILABLE");
+                if (!eth0_up || !eth1_up) {
+                    SYS_CONSOLE_PRINT("Bridging is DISABLED - it needs both interfaces.\n\r");
+                    SYS_CONSOLE_PRINT("Continuing on the surviving interface; check the PHY/daughter board.\n\r");
+                }
+            }
             env_apply();   /* push the persisted network config into the stack (once, stack is up) */
             MIRROR_Initialize();  /* deferred from APP_Initialize() - see comment there; stack/heap are up here */
             {

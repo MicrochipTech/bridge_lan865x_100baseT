@@ -41,11 +41,12 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 8 | `library\tcpip\src\telnet.c` — `F_Telnet_MSG()` real backpressure | Large command output over Telnet (e.g. `dump`, `netinfo`) truncates instead of completing | Medium — correctness, Telnet-only |
 | 9 | `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction | T1S→100BASE-TX TCP forwarding stalls after the first near-MTU-size segment; legitimate large frames silently rejected (`failMtu`) | High — correctness, forwarding-path |
 | 10 | `driver\lan865x\src\dynamic\tc6\tc6-conf.h` — `TC6_TX_ETH_MAX_SEGMENTS` 1u → 3u | Any TCP payload the bridge's own stack sends (not merely forwards) out `eth0` silently fails, hitting the TCPIP Stack Assert | High — correctness, bridge-originated TCP |
+| 11 | `library\tcpip\src\tcpip_manager.c` — record the power state of an interface that failed to initialize | A MAC/PHY that is not physically fitted aborts the **entire** stack, taking the healthy interface, the MAC bridge, Telnet and LAN865x register access down with it | High — availability, unfitted-hardware only |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
 Recommended re-apply order after any `Generate Code` run: **1 first** (nothing else
 matters if the board can't boot), then rebuild/flash/confirm it boots at all, then
-**2–5, 7, 9, 10** in any order, rebuild/flash/retest once more. **6** will simply fail
+**2–5, 7, 9–11** in any order, rebuild/flash/retest once more. **6** will simply fail
 to compile if missed, so the build itself catches it — no separate verification
 needed.
 
@@ -601,6 +602,73 @@ re-verified on hardware after the fix** — re-run
 `scripts\iperf_matrix_test.py --pairs "Bridge->FollowerA,Bridge->FollowerB"`
 after rebuilding/reflashing and confirm both report a real Mbit/s figure
 instead of 0.00, with `stats`' eth0 `err` no longer climbing.
+
+---
+
+## 11. `library\tcpip\src\tcpip_manager.c` — survive a MAC/PHY that is not fitted
+
+**Why:** a network interface whose MAC/PHY is not physically present does not
+merely stay down - it takes the whole TCP/IP stack with it, including the
+interfaces that are perfectly healthy. Measured on a board populated with the
+LAN8651 T1S MAC-PHY but *without* the 100BASE-TX daughter board (2026-09-02):
+
+```
+TCP/IP Stack: Initialization Started
+DRV_PHY operation error: -1
+DRV PHY init failed: -1
+TCP/IP Stack: Interface Initialization failed: 0x1 - Aborting!
+```
+
+Afterwards `netinfo` reported **both** interfaces as `Interface is down`,
+`stats` answered `stats not available`, and every `lan` command failed with
+`result=-5` - so the board was not even usable as a LAN865x register tool,
+although its T1S side was fully intact. The serial CLI itself survived
+(`timestamp`, `uptime`, `meminfo`), because SYS_CMD does not depend on the
+stack.
+
+The mechanism: when a MAC reports a negative status the manager calls
+`TCPIP_STACK_BringNetDown(..., TCPIP_MAC_POWER_DOWN)`, which clears
+`bInterfaceEnabled` but never records the power mode it just applied. The
+readiness check afterwards only counts an interface as *done* if either its
+`powerMode` is no longer `POWER_FULL`, or it is enabled - a failed interface is
+neither, so `ifUpMask` never completes, and the `else` branch tears down every
+interface and sets `SYS_STATUS_ERROR`. The `0x1` in the message is that mask:
+bit 0 (eth0) set, bit 1 (eth1) clear.
+
+**Patch:** one assignment, after the existing `BringNetDown()` call:
+
+```c
+pNetIf->Flags.powerMode = (uint16_t)TCPIP_MAC_POWER_DOWN;
+```
+
+That makes the dead interface take the *already existing* "counts as done"
+branch, so the mask completes and the stack comes up with whatever survived.
+Nothing else changes: the failure path, the console error and the teardown of
+the affected interface are all untouched.
+
+**No MCC field exists for this** - it is stack behaviour, not a configuration
+value.
+
+**Verified on hardware (2026-09-02)**, same board, with the patch:
+
+```
+DRV PHY init failed: -1
+TCP/IP Stack: Initialization Ended - success
+eth0 (10BASE-T1S) : up
+eth1 (100BASE-TX) : NOT AVAILABLE
+Bridging is DISABLED - it needs both interfaces.
+```
+
+The board then worked as an ordinary T1S node: `eth0` `Link is UP` /
+`Status: Ready`, ping in both directions against the bridge and a follower
+4 of 4 with `eth0 err=0`, and `lan_read 0x000A0094` returning `0x00086511`
+(DEVID: model 0x8651, revision 1). `eth1` is reported as `Interface is down`,
+and the readable summary above comes from `app.c`, not from this patch.
+
+**If lost:** any board missing one of its two PHYs stops being diagnosable -
+no stack, no bridge, no Telnet, no register access, and only the bare serial
+commands that do not touch a network driver. Bridging itself is impossible
+either way with one port; what the patch preserves is everything else.
 
 ---
 

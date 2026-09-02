@@ -2024,6 +2024,19 @@ static bool F_TCPIPStackIsRunState(void)
                 {   // failed; kill the interface
                     TCPIP_STACK_BringNetDown(&tcpip_stack_ctrl_data, pNetIf, TCPIP_STACK_ACTION_IF_DOWN, TCPIP_MAC_POWER_DOWN);
                     pNetIf->Flags.bMacInitDone = 1;
+                    /* EXPERIMENT (2026-09-02): survive a MAC/PHY that is not
+                     * physically there, instead of aborting the whole stack.
+                     * BringNetDown() clears bInterfaceEnabled but leaves
+                     * powerMode at POWER_FULL, so the readiness check below
+                     * never sets this interface's bit in ifUpMask, the mask
+                     * stays incomplete and every interface is torn down -
+                     * measured on a board without its 100BASE-TX PHY:
+                     * "Interface Initialization failed: 0x1 - Aborting!",
+                     * taking the perfectly healthy T1S side with it.
+                     * Recording the power state the interface was actually
+                     * put into makes it count as "done" rather than "pending",
+                     * so the stack comes up with the surviving interface. */
+                    pNetIf->Flags.powerMode = (uint16_t)TCPIP_MAC_POWER_DOWN;
                 }
                 else if(macStat == SYS_STATUS_READY)
                 {   // get the MAC address and MAC processing flags
