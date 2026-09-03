@@ -66,6 +66,7 @@ still pristine MCC output, before any hand-patch to it):
 | `telnet.patch` | `a23af6c` |
 | `tcpip_mac_bridge.patch` | `0dc62ac` |
 | `tc6-conf.patch` | `fd375c4` |
+| `tcpip_manager.patch` | `50ec799` |
 
 (`drv_lan865x_api.patch`'s baseline already contains the `stdarg.h` fix for that
 file, bundled into that commit - that's why `stdarg.h` is handled separately, not
