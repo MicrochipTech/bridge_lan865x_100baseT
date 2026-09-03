@@ -45,6 +45,7 @@
 #include "testserver.h"
 #include "cmd_print.h"          /* CMD_PRINT/CMD_MSG - reply to pCmdIO, not always the serial console */
 #include "definitions.h"        /* sysObj - only for APP_PumpNetworkStack(), see its comment */
+#include "config/default/driver/miim/drv_miim.h"   /* boot banner: read eth1's PHY ID over MDIO */
 
 // *****************************************************************************
 // *****************************************************************************
@@ -730,6 +731,244 @@ void APP_Initialize ( void )
 }
 
 
+// *****************************************************************************
+// Section: Boot banner - which MAC/PHY is actually fitted, and which revision
+//
+// Both identities have to be read from the hardware, and both reads are
+// asynchronous: eth0's goes out over the TC6 SPI link, eth1's over MDIO. So the
+// banner cannot be printed from APP_STATE_SERVICE_TASKS directly - it is
+// assembled by banner_tasks() over the following main-loop passes and printed
+// once, when every answer is in or has timed out. A PHY that is not fitted
+// reads back all-ones or does not answer at all, which is exactly the
+// information wanted, so a failed read is reported rather than hidden.
+// *****************************************************************************
+
+#define BANNER_LAN865X_DEVID    0x000A0094u  /* MMS10 Misc. Per errata DS80001075F
+                                              * this - not OA_PHYID - is the
+                                              * register that identifies the part. */
+#define BANNER_PHY_REG_ID1      2u           /* IEEE 802.3 clause 22 PHY ID */
+#define BANNER_PHY_REG_ID2      3u
+/* Clause 22 PHYID2 fields, same masks as the driver's own drv_extphy_regs.h */
+#define BANNER_PHYID2_OUI_LSB   0xFC00u
+#define BANNER_PHYID2_MODEL     0x03F0u
+#define BANNER_PHYID2_REV       0x000Fu
+#define BANNER_STEP_TIMEOUT_MS  1500u
+
+typedef enum {
+    BANNER_IDLE = 0,
+    BANNER_ETH0_START,
+    BANNER_ETH0_WAIT,
+    BANNER_ETH1_ID1_START,
+    BANNER_ETH1_ID1_WAIT,
+    BANNER_ETH1_ID2_START,
+    BANNER_ETH1_ID2_WAIT,
+    BANNER_PRINT
+} banner_state_t;
+
+static banner_state_t s_banner_state    = BANNER_IDLE;
+static bool           s_banner_eth0_up  = false;
+static bool           s_banner_eth1_up  = false;
+static bool           s_banner_eth0_ok  = false;   /* DEVID actually read back */
+static uint32_t       s_banner_devid    = 0u;
+static bool           s_banner_eth1_ok  = false;   /* both PHY ID regs read back */
+static uint16_t       s_banner_phyid1   = 0u;
+static uint16_t       s_banner_phyid2   = 0u;
+static uint64_t       s_banner_deadline = 0u;
+static DRV_HANDLE     s_banner_miim     = DRV_HANDLE_INVALID;
+static DRV_MIIM_OPERATION_HANDLE s_banner_miim_op = NULL;
+
+static void banner_arm_timeout(void)
+{
+    uint64_t tps = (uint64_t)SYS_TIME_FrequencyGet();
+    s_banner_deadline = SYS_TIME_Counter64Get() + ((tps * BANNER_STEP_TIMEOUT_MS) / 1000ULL);
+}
+
+static bool banner_timed_out(void)
+{
+    return ((int64_t)(SYS_TIME_Counter64Get() - s_banner_deadline) >= 0);
+}
+
+/* Start the identification. Called once, from APP_STATE_SERVICE_TASKS. */
+static void banner_start(bool eth0_up, bool eth1_up)
+{
+    s_banner_eth0_up = eth0_up;
+    s_banner_eth1_up = eth1_up;
+    /* Must be armed here: BANNER_ETH0_START checks the deadline while waiting
+       for env_apply()'s PLCA write to release the single register slot, and an
+       unarmed (zero) deadline reads as already expired. */
+    banner_arm_timeout();
+    s_banner_state   = BANNER_ETH0_START;
+}
+
+/* One MDIO read, kicked off and left to complete. Returns false if the MIIM
+   driver would not take the request, in which case the caller gives up on
+   eth1's identity rather than blocking the banner. */
+static bool banner_miim_read_start(uint16_t reg)
+{
+    DRV_MIIM_RESULT res = DRV_MIIM_RES_OK;
+
+    if (s_banner_miim == DRV_HANDLE_INVALID) {
+        /* A second client alongside the PHY driver's own - the MIIM instance is
+           configured for DRV_MIIM_INSTANCE_CLIENTS (2), so there is room. */
+        s_banner_miim = DRV_MIIM_Open(DRV_MIIM_INDEX_0, DRV_IO_INTENT_SHARED);
+        if (s_banner_miim == DRV_HANDLE_INVALID) {
+            return false;
+        }
+    }
+    s_banner_miim_op = DRV_MIIM_Read(s_banner_miim, reg,
+                                     (uint16_t)DRV_LAN8742A_PHY_ADDRESS,
+                                     DRV_MIIM_OPERATION_FLAG_NONE, &res);
+    return ((s_banner_miim_op != NULL) && (res >= DRV_MIIM_RES_OK));
+}
+
+/* Collect a started MDIO read. Returns true once it is finished either way;
+   *pOk says whether a value was actually produced. */
+static bool banner_miim_read_done(uint16_t *pVal, bool *pOk)
+{
+    uint32_t data = 0u;
+    DRV_MIIM_RESULT res = DRV_MIIM_OperationResult(s_banner_miim, s_banner_miim_op, &data);
+
+    if (res == DRV_MIIM_RES_PENDING) {
+        if (!banner_timed_out()) {
+            return false;
+        }
+        (void)DRV_MIIM_OperationAbort(s_banner_miim, s_banner_miim_op);
+        *pOk = false;
+        return true;
+    }
+    *pOk  = (res == DRV_MIIM_RES_OK);
+    *pVal = (uint16_t)data;
+    return true;
+}
+
+static void banner_print(void)
+{
+    /* eth0 - LAN865x family, DEVID: model in bits 19:4, revision in 3:0 */
+    if (!s_banner_eth0_up) {
+        SYS_CONSOLE_PRINT("eth0 (10BASE-T1S) : NOT AVAILABLE\n\r");
+    } else if (!s_banner_eth0_ok) {
+        SYS_CONSOLE_PRINT("eth0 (10BASE-T1S) : up    (chip ID could not be read)\n\r");
+    } else {
+        uint32_t model = (s_banner_devid >> 4) & 0xFFFFu;
+        uint32_t rev   =  s_banner_devid       & 0xFu;
+        const char *name = (model == 0x8651u) ? "LAN8651"
+                         : (model == 0x8650u) ? "LAN8650" : "unknown model";
+        SYS_CONSOLE_PRINT("eth0 (10BASE-T1S) : up    %s rev %u  (DEVID 0x%08X)\n\r",
+                          name, (unsigned)rev, (unsigned int)s_banner_devid);
+    }
+
+    /* eth1 - external PHY, clause 22 PHY ID across registers 2 and 3 */
+    if (!s_banner_eth1_up) {
+        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : NOT AVAILABLE\n\r");
+    } else if (!s_banner_eth1_ok) {
+        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : up    (PHY ID could not be read)\n\r");
+    } else {
+        /* OUI is 22 bits: all of PHYID1, then PHYID2's top 6 */
+        uint32_t oui   = ((uint32_t)s_banner_phyid1 << 6)
+                       | (uint32_t)((s_banner_phyid2 & BANNER_PHYID2_OUI_LSB) >> 10);
+        uint32_t model = (uint32_t)((s_banner_phyid2 & BANNER_PHYID2_MODEL) >> 4);
+        uint32_t rev   = (uint32_t) (s_banner_phyid2 & BANNER_PHYID2_REV);
+        /* Model 0x11 is what the AC320004-3 daughter board fitted on this bench
+           reports - see README.md, where that pairing was confirmed against a
+           known-good LAN8740A image. Anything else prints the number only,
+           rather than guessing a name; the raw registers are always shown so a
+           wrong label could not hide the real value. Note MCC selects the
+           LAN8742A driver object, which drives either part for this purpose. */
+        const char *part = (oui != 0x0001F0u) ? ""
+                         : (model == 0x11u)   ? "LAN8740A " : "";
+        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : up    %s %smodel 0x%02X rev %u  (OUI 0x%06X, PHYID %04X:%04X)\n\r",
+                          (oui == 0x0001F0u) ? "Microchip" : "vendor", part,
+                          (unsigned)model, (unsigned)rev, (unsigned int)oui,
+                          (unsigned)s_banner_phyid1, (unsigned)s_banner_phyid2);
+    }
+
+    if (!s_banner_eth0_up || !s_banner_eth1_up) {
+        SYS_CONSOLE_PRINT("Bridging is DISABLED - it needs both interfaces.\n\r");
+        SYS_CONSOLE_PRINT("Continuing on the surviving interface; check the PHY/daughter board.\n\r");
+    }
+}
+
+/* Driven from APP_STATE_IDLE, after LAN865X_DIAG_Tasks() so that a completed
+   register read is visible in the same pass. */
+static void banner_tasks(void)
+{
+    switch (s_banner_state) {
+        case BANNER_IDLE:
+            break;
+
+        case BANNER_ETH0_START:
+            if (!s_banner_eth0_up) {
+                s_banner_state = BANNER_ETH1_ID1_START;   /* nothing to ask */
+            } else if (!LAN865X_DIAG_Busy() && LAN865X_DIAG_Read(BANNER_LAN865X_DEVID)) {
+                banner_arm_timeout();
+                s_banner_state = BANNER_ETH0_WAIT;
+            } else if (banner_timed_out()) {
+                s_banner_state = BANNER_ETH1_ID1_START;   /* slot never freed up */
+            } else {
+                /* env_apply()'s PLCA write may still hold the single slot */
+            }
+            break;
+
+        case BANNER_ETH0_WAIT:
+            if (LAN865X_DIAG_LastReadValue(BANNER_LAN865X_DEVID, &s_banner_devid)) {
+                s_banner_eth0_ok = true;
+                s_banner_state   = BANNER_ETH1_ID1_START;
+            } else if (banner_timed_out()) {
+                s_banner_state = BANNER_ETH1_ID1_START;
+            }
+            break;
+
+        case BANNER_ETH1_ID1_START:
+            if (!s_banner_eth1_up) {
+                s_banner_state = BANNER_PRINT;
+            } else if (banner_miim_read_start(BANNER_PHY_REG_ID1)) {
+                banner_arm_timeout();
+                s_banner_state = BANNER_ETH1_ID1_WAIT;
+            } else {
+                s_banner_state = BANNER_PRINT;
+            }
+            break;
+
+        case BANNER_ETH1_ID1_WAIT:
+        {
+            bool ok = false;
+            if (banner_miim_read_done(&s_banner_phyid1, &ok)) {
+                s_banner_state = ok ? BANNER_ETH1_ID2_START : BANNER_PRINT;
+            }
+            break;
+        }
+
+        case BANNER_ETH1_ID2_START:
+            if (banner_miim_read_start(BANNER_PHY_REG_ID2)) {
+                banner_arm_timeout();
+                s_banner_state = BANNER_ETH1_ID2_WAIT;
+            } else {
+                s_banner_state = BANNER_PRINT;
+            }
+            break;
+
+        case BANNER_ETH1_ID2_WAIT:
+        {
+            bool ok = false;
+            if (banner_miim_read_done(&s_banner_phyid2, &ok)) {
+                s_banner_eth1_ok = ok;
+                s_banner_state   = BANNER_PRINT;
+            }
+            break;
+        }
+
+        case BANNER_PRINT:
+        default:
+            if (s_banner_miim != DRV_HANDLE_INVALID) {
+                DRV_MIIM_Close(s_banner_miim);
+                s_banner_miim = DRV_HANDLE_INVALID;
+            }
+            banner_print();
+            s_banner_state = BANNER_IDLE;
+            break;
+    }
+}
+
 /******************************************************************************
   Function:
     void APP_Tasks ( void )
@@ -770,22 +1009,21 @@ void APP_Tasks ( void )
             TCPIP_NET_HANDLE eth1_net_hd = TCPIP_STACK_IndexToNet(1);
             TCPIP_STACK_PacketHandlerRegister(eth1_net_hd, pktEth1Handler, MyEth1HandlerParam);
 
-            /* Say plainly which interfaces actually came up. The stack already
-             * prints "DRV PHY init failed: -1" when a PHY is not physically
-             * there, but that says nothing about what the board can still do.
-             * With the tcpip_manager power-state fix, a missing PHY no longer
-             * aborts the whole stack - the board keeps running on whatever
-             * interface survived, and this line is what tells the operator so. */
-            {
-                bool eth0_up = TCPIP_STACK_NetIsUp(eth0_net_hd);
-                bool eth1_up = TCPIP_STACK_NetIsUp(eth1_net_hd);
-                SYS_CONSOLE_PRINT("eth0 (10BASE-T1S) : %s\n\r", eth0_up ? "up" : "NOT AVAILABLE");
-                SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : %s\n\r", eth1_up ? "up" : "NOT AVAILABLE");
-                if (!eth0_up || !eth1_up) {
-                    SYS_CONSOLE_PRINT("Bridging is DISABLED - it needs both interfaces.\n\r");
-                    SYS_CONSOLE_PRINT("Continuing on the surviving interface; check the PHY/daughter board.\n\r");
-                }
-            }
+            /* Say plainly which interfaces actually came up, and which part is
+             * fitted on each. The stack already prints "DRV PHY init failed: -1"
+             * when a PHY is not physically there, but that says nothing about
+             * what the board can still do. With the tcpip_manager power-state
+             * fix, a missing PHY no longer aborts the whole stack - the board
+             * keeps running on whatever interface survived, and this report is
+             * what tells the operator so.
+             *
+             * The build timestamp goes out here and now; the interface lines
+             * cannot, because identifying the two parts means reading registers
+             * over SPI and MDIO. banner_tasks() finishes that over the next few
+             * main-loop passes and prints them - see its section above. */
+            SYS_CONSOLE_PRINT("Build Timestamp   : "__DATE__" "__TIME__"\n\r");
+            banner_start(TCPIP_STACK_NetIsUp(eth0_net_hd),
+                         TCPIP_STACK_NetIsUp(eth1_net_hd));
             env_apply();   /* push the persisted network config into the stack (once, stack is up) */
             MIRROR_Initialize();  /* deferred from APP_Initialize() - see comment there; stack/heap are up here */
             {
@@ -810,6 +1048,11 @@ void APP_Tasks ( void )
 
             /* Register access / test modes / PLCA - see lan865x_diag.c */
             LAN865X_DIAG_Tasks();
+
+            /* Boot-time chip identification. Runs after LAN865X_DIAG_Tasks() so
+             * a register read that just completed is visible in the same pass,
+             * and does nothing at all once the banner has been printed. */
+            banner_tasks();
 
             /* Sniffer's pending T1SPMACTL.TXD write: retries it and evaluates
              * the readback LAN865X_DIAG_Tasks() just produced, so it has to run

@@ -649,21 +649,27 @@ the affected interface are all untouched.
 **No MCC field exists for this** - it is stack behaviour, not a configuration
 value.
 
-**Verified on hardware (2026-09-02)**, same board, with the patch:
+**Verified on hardware (2026-09-02, re-verified 2026-09-03)**, same board, with
+the patch:
 
 ```
 DRV PHY init failed: -1
 TCP/IP Stack: Initialization Ended - success
-eth0 (10BASE-T1S) : up
+Build Timestamp   : Sep  3 2026 17:36:13
+eth0 (10BASE-T1S) : up    LAN8651 rev 1  (DEVID 0x00086511)
 eth1 (100BASE-TX) : NOT AVAILABLE
 Bridging is DISABLED - it needs both interfaces.
+Continuing on the surviving interface; check the PHY/daughter board.
 ```
 
 The board then worked as an ordinary T1S node: `eth0` `Link is UP` /
 `Status: Ready`, ping in both directions against the bridge and a follower
-4 of 4 with `eth0 err=0`, and `lan_read 0x000A0094` returning `0x00086511`
-(DEVID: model 0x8651, revision 1). `eth1` is reported as `Interface is down`,
-and the readable summary above comes from `app.c`, not from this patch.
+4 of 4 with `eth0 err=0`. `eth1` is reported as `Interface is down`, and the
+readable summary above comes from `app.c`, not from this patch — including the
+part number and revision, which `app.c` reads from the hardware at boot (`DEVID`
+over SPI for eth0, the clause-22 PHY ID over MDIO for eth1). On a board that
+does have its 100BASE-TX PHY the second line reads
+`up    Microchip LAN8740A model 0x11 rev 1  (OUI 0x0001F0, PHYID 0007:C111)`.
 
 **If lost:** any board missing one of its two PHYs stops being diagnosable -
 no stack, no bridge, no Telnet, no register access, and only the bare serial

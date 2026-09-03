@@ -68,6 +68,13 @@ static uint32_t    s_rmw_final    = 0u;     /* word the driver actually wrote ba
 static uint64_t    s_expire_tick  = 0u;     /* SYS_TIME tick at which the operation times out */
 static bool        s_op_initiated = false;
 
+/* Last successfully completed read, kept sticky (the state above is reset the
+   moment the operation finishes) so a caller polling for completion can still
+   collect the value. See LAN865X_DIAG_LastReadValue(). */
+static uint32_t s_last_read_addr = 0u;
+static uint32_t s_last_read_val  = 0u;
+static bool     s_last_read_ok   = false;
+
 /* Who to send the eventual result to - LAN865X_DIAG_Tasks() completes the pending
  * register operation asynchronously, well after the command handler that started
  * it (cmd_lan_read/write/rmw, cmd_testmode, cmd_plca_stat) has already returned,
@@ -397,6 +404,14 @@ bool LAN865X_DIAG_Read(uint32_t addr) {
     return true;
 }
 
+bool LAN865X_DIAG_LastReadValue(uint32_t addr, uint32_t *out) {
+    if ((out == NULL) || !s_last_read_ok || (s_last_read_addr != addr)) {
+        return false;
+    }
+    *out = s_last_read_val;
+    return true;
+}
+
 bool LAN865X_DIAG_Write(uint32_t addr, uint32_t value) {
     if (s_state != LAN_IDLE) {
         return false;
@@ -696,6 +711,9 @@ void LAN865X_DIAG_Tasks(void) {
                 }
             } else {
                 if (s_op_success) {
+                    s_last_read_addr = s_addr;
+                    s_last_read_val  = s_read_value;
+                    s_last_read_ok   = true;
                     CMD_PRINT_OR_CONSOLE(s_diag_pCmdIO, "LAN865X Read OK: Addr=0x%08X Value=0x%08X\n\r",
                                       (unsigned int)s_addr, (unsigned int)s_read_value);
                     if (s_verify_pending) {

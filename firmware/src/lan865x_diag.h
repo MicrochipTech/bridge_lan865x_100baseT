@@ -222,6 +222,13 @@ LAN865X_VERIFY_RESULT LAN865X_DIAG_VerifyResult(void);
 bool LAN865X_DIAG_Read(uint32_t addr);
 bool LAN865X_DIAG_Write(uint32_t addr, uint32_t value);
 
+/* Value of the last register read that actually completed successfully, for
+   callers that need it programmatically rather than printed - the boot-time
+   chip identification in app.c is the one user. Returns false until a read
+   has succeeded, and false if `addr` is not the address that was read, so a
+   stale value from an earlier read can never be mistaken for this one. */
+bool LAN865X_DIAG_LastReadValue(uint32_t addr, uint32_t *out);
+
 /* Read-modify-write. Driver semantics: new = (old & ~mask) | value. Note that
    the driver does NOT mask `value`, so bits outside `mask` are written anyway.
    The masked field is verified by a follow-up read; self-clearing bits such as
