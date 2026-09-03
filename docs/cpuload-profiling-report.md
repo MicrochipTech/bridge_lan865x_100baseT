@@ -16,7 +16,12 @@ DMA hunch
 ([§9](#9-addendum--a-third-corruption-bug-an-explicit-3-number-cpu-load-and-an-open-question-on-isr_spi)),
 and finally a fourth live-mode bug — an 80-column line-wrap the fixed
 cursor-up math didn't know about
-([§10](#10-addendum--a-fourth-live-mode-bug-lines-wider-than-the-terminal)).
+([§10](#10-addendum--a-fourth-live-mode-bug-lines-wider-than-the-terminal)),
+and a self-calibrating utilization estimate added after the user pointed out
+that the interrupts/tasks split is a time breakdown, not a real load figure
+([§11](#11-addendum--a-self-calibrating-load-estimate)), and finally a
+worked example of `cpuload live` catching its own observer effect
+([§12](#12-addendum--worked-example-cpuload-live-catching-its-own-observer-effect)).
 
 ---
 
@@ -625,3 +630,151 @@ feature:** anything that redraws a terminal screen by counting *logical*
 print calls has to independently guarantee those logical lines never exceed
 the terminal's physical width, or the two counts silently diverge. Worth
 remembering if `cpuload`'s table grows a column later.
+
+## 11. Addendum — a self-calibrating load estimate
+
+The user's own assessment of everything above, verbatim in spirit: you can
+now see, live, how much time goes to which task — but because everything
+just repeats in a round-robin loop with nothing that ever sleeps, an actual
+CPU *utilization* figure isn't representable this way at all. Correct.
+`CPU load: interrupts X%, tasks Y%, total Z%` (§8) is a time breakdown, not
+a load figure — the loop is 100% "busy" by construction, so there is no
+idle state to measure spare capacity against, and the split only ever says
+*where* the time went.
+
+**The fix: a self-calibrating baseline instead of a real idle task.**
+`TOTAL.min` — the single fastest `SYS_Tasks()` pass seen since the last
+reset — is the closest thing this system has to "idle": a pass where
+whatever got polled found nothing extra to do. Comparing the *average* pass
+against that baseline gives an actual utilization-shaped number:
+
+```c
+uint32_t vsMinPct = (uint32_t)(((uint64_t)(meanCycles - total->min) * 100u) / total->min);
+```
+
+printed as a new line, `Load vs fastest pass: N% (mean M vs min m cycles)`,
+right after the existing `TOTAL:` summary line in both `cpuload stats` and
+`cpuload live`.
+
+**Two clarifying exchanges with the user while building this, both folded
+into the CLI reference so the next reader doesn't have to ask the same
+things:**
+
+- *"Is the fastest pass basically zero load, then?"* Not literally zero —
+  even the fastest pass still polls all five main-loop calls and pays the
+  `cpuload` instrumentation's own overhead, just with nothing extra for any
+  of them to do. It's the loop's fixed baseline cost, not an absence of
+  cost. `N%` measures the *variable* load stacked on top of that baseline,
+  not absolute idleness.
+- *"So 100% is the load at which the CPU can no longer serve the
+  application?"* No — and this was worth correcting explicitly rather than
+  letting the classic OS-load-percentage intuition carry over silently.
+  `N%` is an **unbounded ratio**, not a 0–100% saturation gauge: `100%`
+  means "the average pass now takes twice as long as the fastest one ever
+  seen", `300%` means four times as long, with no ceiling and no fixed
+  number that means "can't keep up". This loop has no fixed period or
+  deadline to blow through - it simply gets slower as more piles into each
+  pass. An actual problem here shows up as concrete symptoms elsewhere
+  (PLCA/T1S timing violated, `stats`' `qFull`/`err` climbing, the console
+  visibly lagging), not as this number crossing a threshold. Treat it as a
+  trend to watch, not a limit to compare against.
+
+**Implementation notes:** added to the same `TOTAL`-summary block in
+`PrintStatsTable()`, reusing the already-computed `meanCycles` rather than
+dividing twice. `CPULOAD_LIVE_FRAME_LINES` bumped from `+7` to `+8` fixed
+lines for the live redraw's cursor-up math (§10's lesson applied
+immediately this time: measured the new line's worst case - 3-digit percent,
+10-digit cycle counts both sides - at 69 columns before shipping it, well
+under 80). `total->min` can be `0` only when `total->count` is also `0` (no
+samples yet), so the same guard covers both.
+
+**Verified on hardware, 2026-09-03:** `Load vs fastest pass: 5%` through
+`6%` across several idle-bus samples (mean a few percent above min, as
+expected for a quiet bus); live-mode redraw re-checked at the new 20-line
+frame height — 8 clean redraws in 8s, consistently `\x1b[20A`, `TOTAL`
+strictly increasing; both unit modes re-confirmed at zero lines over 80
+columns.
+
+## 12. Addendum — worked example: `cpuload live` catching its own observer effect
+
+A `cpuload live` frame the user captured and asked to have explained, kept
+here verbatim as a worked example of reading the table - it turned out to
+demonstrate a real, previously undiscussed effect of this feature on itself:
+
+```
+  slot        n          min        max       mean     median  (us)
+-- main loop --
+  sys_cmd     1950759    2          232       3        2
+  miim        1950759    1          32        1        1
+  tcpip       1950759    18         352       20       18
+  net_pres    1950759    1          20        1        1
+  app         1950759    3          188       3        3
+  TOTAL       1950759    30         476       33       30
+-- interrupts --
+  isr_dmac0   16132      1          1         1        1
+  isr_dmac1   16132      3          4         4        4
+  isr_spi     (no samples yet)
+  isr_usart   83766      1          2         1        1
+  isr_gmac    12492      1          1         1        1
+  isr_tc0     145794     3          7         5        5
+TOTAL: mean 4041 cycles (33 us) per pass -> avg 29695 loops/s
+Load vs fastest pass: 10% (mean 4041 vs min 3664 cycles)
+CPU load: interrupts 1%, tasks 99%, total 100%
+median: last <=128 samples/slot - min/max/mean: since last reset
+```
+
+**What stands out, compared to the quiet-bus baseline from §4/§8**
+(`TOTAL` mean ~2039-2090 cycles / ~16-17 µs, ~58,000-60,000 loops/s,
+`isr_usart` a few hundred hits over a comparable window):
+
+| | This frame | Quiet-bus baseline |
+|---|---|---|
+| `TOTAL` mean | 33 µs (4041 cycles) | ~16-17 µs |
+| loop rate | ~29,700/s | ~58,000-60,000/s |
+| `isr_usart` hits | 83,766 | a few hundred |
+
+Roughly half the loop rate, double the per-pass cost - while `CPU load:
+interrupts 1%` looks unremarkable and `Load vs fastest pass: 10%` looks
+low. Neither number is wrong; both are answering a narrower question than
+"is the board more loaded than usual".
+
+**Root cause: this is a live frame, and printing it is itself real load.**
+The `(us)` header only ever appears from `cpuload live` (`cpuload stats` is
+always cycles) - so this snapshot was captured *while the live view itself
+was running*. `cpuload live` prints a ~20-line table over the console once
+a second, and this console's UART is genuinely interrupt-driven byte by
+byte (`isr_usart`, unlike `isr_spi` - see §9), not DMA. Printing that table
+therefore measurably drives `SERCOM1_USART_InterruptHandler()` for as long
+as the bytes take to drain, and every one of those interrupts still counts
+against whichever main-loop bracket happens to be open at that instant -
+exactly the documented caveat in §7 about interrupt time folding into
+main-loop numbers, just now caught in the act with a concrete before/after.
+`isr_usart` at 83,766 (vs. a few hundred normally) is the direct fingerprint
+of the table being printed, over and over, for as long as this session ran.
+
+**Why `Load vs fastest pass` understates it here specifically:** `min`
+(3664 cycles) was *also* measured during this same live session, so it is
+already inflated by the same printing overhead the `mean` is being compared
+against - both numbers are elevated together. `10%` answers "how much does
+this already-loaded session vary internally", not "how much slower than a
+genuinely idle board" - measured against the real quiet-bus baseline
+(~1858-1937 cycles, §11), this frame's `min` of 3664 is itself already
+roughly double. §11's own caveat ("a short observation window may simply
+not have caught the true best case yet") applies exactly here, just via a
+different mechanism: it's not that the fast case wasn't observed, it's that
+*no* pass in this window was unaffected by the thing being measured.
+
+**`tcpip`'s minimum (18 µs vs. the usual ~5-6 µs) fits the same story:**
+individual `isr_usart` hits from the table print land inside whichever
+slot's bracket happens to be open at that instant - main-loop tcpip's
+bracket included, occasionally - pulling its own minimum up too, by the
+same mechanism as `TOTAL`'s.
+
+**Not a new bug - a genuine, previously undocumented property of the
+feature worth naming explicitly:** watching `cpuload live` changes the very
+load it measures, mainly via `isr_usart`, the one interrupt source directly
+tied to how much this feature itself is printing. `cpuload stats` (a single
+snapshot, not repeated once a second) does not have this effect - reach for
+it instead of `live` when the goal is "what is the board doing when nobody
+is watching," and treat `isr_usart` counts recorded during a `live` session
+as partly measuring the monitor, not only the system it's monitoring.

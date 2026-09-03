@@ -240,11 +240,15 @@ static void PrintOneSlot(SYS_CMD_DEVICE_NODE *pCmdIO, uint32_t slot, bool showUs
 }
 
 /* Fixed number of lines PrintStatsTable() always prints - every section
-   (both loop counts, both "--"/header lines, both summary lines) is now
+   (both loop counts, both "--"/header lines, all four summary lines) is
    unconditional, specifically so this stays a compile-time constant and
    CPULOAD_LivePoll()'s redraw can move the cursor up by exactly this many
-   lines without having to track a variable frame height. See CPULOAD_LivePoll(). */
-#define CPULOAD_LIVE_FRAME_LINES  ((uint32_t)CPULOAD_SLOT_COUNT + 7u)
+   lines without having to track a variable frame height. See
+   CPULOAD_LivePoll(). Update this if PrintStatsTable() ever gains or loses
+   an unconditional CMD_PRINT() call - it will NOT be caught by the build,
+   only by the live view drifting again (docs/cpuload-profiling-report.md
+   §10 has the story on why that failure mode is easy to miss). */
+#define CPULOAD_LIVE_FRAME_LINES  ((uint32_t)CPULOAD_SLOT_COUNT + 8u)
 
 /* Shared by CPULOAD_PrintStats() (always cycles) and the live redraw
    (cycles or microseconds, per 't'/'c' - see CPULOAD_LivePoll()). TOTAL
@@ -273,13 +277,36 @@ static void PrintStatsTable(SYS_CMD_DEVICE_NODE *pCmdIO, bool showUs)
     {
         const cpuload_slot_t *total = &s_slots[CPULOAD_SLOT_TOTAL];
         uint64_t wallCycles = total->sum;   /* every measured pass, back to back - see CPU-load comment below */
+        uint32_t meanCycles = (total->count != 0u) ? (uint32_t)(wallCycles / total->count) : 0u;
+
         if (total->count != 0u) {
-            uint32_t meanCycles = (uint32_t)(wallCycles / total->count);
             CMD_PRINT(pCmdIO, "TOTAL: mean %lu cycles (%lu us) per pass -> avg %lu loops/s\n\r",
                 (unsigned long)meanCycles, (unsigned long)(meanCycles / CPULOAD_CYCLES_PER_US),
                 (meanCycles != 0u) ? (unsigned long)(SYS_TIME_CPU_CLOCK_FREQUENCY / meanCycles) : 0UL);
         } else {
             CMD_PRINT(pCmdIO, "TOTAL: (no samples yet)\n\r");
+        }
+
+        /* The interrupts/tasks/main-loop split below is a time BREAKDOWN,
+           not a utilization figure - the loop is always 100% "busy" by
+           construction (no idle task, no sleep), so there is nothing to
+           measure spare capacity against. This line is the closest thing to
+           one anyway: TOTAL.min, the single fastest pass seen since the
+           last reset, is the closest thing this system has to "idle" - a
+           pass where whatever was polled found nothing to do. Comparing the
+           average pass against that self-calibrating baseline gives an
+           actual utilization-shaped number ("how much slower than the best
+           case"), at the cost of being only as good as the fastest pass
+           actually observed - it can only get better (a faster pass lowers
+           the baseline) or reset to unknown (`cpuload reset`), never get
+           worse on its own, and a short observation window may simply not
+           have caught the true best case yet. */
+        if ((total->count != 0u) && (total->min != 0u)) {
+            uint32_t vsMinPct = (uint32_t)(((uint64_t)(meanCycles - total->min) * 100u) / total->min);
+            CMD_PRINT(pCmdIO, "Load vs fastest pass: %lu%% (mean %lu vs min %lu cycles)\n\r",
+                (unsigned long)vsMinPct, (unsigned long)meanCycles, (unsigned long)total->min);
+        } else {
+            CMD_PRINT(pCmdIO, "Load vs fastest pass: (no samples yet)\n\r");
         }
 
         /* CPU load: an ISR total %, a tasks (main loop) total %, and their

@@ -196,6 +196,7 @@ cpuload: ENABLED (DWT cycle counter, 120.0MHz core clock)
   isr_gmac    46         237        237       237      237    
   isr_tc0     20387      523        898       652      671    
 TOTAL: mean 2042 cycles (17 us) per pass -> avg 58765 loops/s
+Load vs fastest pass: 6% (mean 2042 vs min 1937 cycles)
 CPU load: interrupts 1%, tasks 99%, total 100%
 median: last <=128 samples/slot - min/max/mean: since last reset
 ```
@@ -232,13 +233,45 @@ that main-loop slot's own number — nothing subtracts it back out. The
 interrupt section tells you roughly how much that could be; it is not netted
 against the main-loop figures automatically.
 
-**`CPU load: interrupts X%, tasks Y%, total Z%`** — the closest thing to
-an overall load figure this feature can honestly give. There is no idle task
-here to compare against (the bare-metal loop never sleeps), so a classic
-"busy vs. idle %" doesn't apply; this is instead a plain 2-way split of every
-cycle measured so far — interrupts vs. everything else — always summing to
-100%. A rising interrupt share is the clearest single signal that the board
-is under load.
+**`CPU load: interrupts X%, tasks Y%, total Z%`** is a time **breakdown**,
+not a utilization figure — the bare-metal loop never sleeps, so it is always
+100% "busy" by construction, and there is no idle task to measure spare
+capacity against. It is instead a plain 2-way split of every cycle measured
+so far — interrupts vs. everything else — always summing to 100%. A rising
+interrupt share is the clearest single signal that the board is under load,
+but the number itself only ever says *where* the time went, never *how much
+headroom is left*.
+
+**`Load vs fastest pass: N%`** is the closer attempt at an actual
+utilization-shaped number, self-calibrating instead of needing a real idle
+task: `TOTAL.min`, the single fastest pass seen since the last reset, is the
+closest thing this system has to "idle" — a pass where whatever the loop
+polled found nothing extra to do. `N%` is how much slower the *average*
+pass is than that fastest one, so it is genuinely 0 at the theoretical floor
+and grows as real work piles on.
+
+**Important: this is not a 0–100% saturation gauge like a classic OS load
+percentage — it is an unbounded ratio.** `100%` means "the average pass now
+takes twice as long as the fastest one ever seen", `300%` means four times
+as long, and so on with no ceiling; there is no fixed number that means "the
+CPU can no longer keep up". That is a real architectural difference from a
+system with a fixed control period or hard deadlines: this round-robin loop
+just gets slower as more piles into each pass, it does not hit a wall at a
+particular percentage. What an actual problem looks like here is not a
+number crossing some threshold, but concrete symptoms elsewhere — PLCA/T1S
+timing violated, `stats`' `qFull`/`err` counters climbing, the console or
+Telnet visibly lagging. Treat `Load vs fastest pass` as a trend to watch,
+not a limit to compare against.
+
+Also worth knowing: `TOTAL.min` is not literally "zero work" either — even
+the fastest pass still polls all five main-loop calls and pays the
+`cpuload` instrumentation's own overhead, just with nothing extra for any
+of them to do. It is the loop's fixed baseline cost, not an absence of
+cost — `N%` measures the *variable* load stacked on top of that baseline.
+It can also only get better (a new fastest pass lowers the baseline) or
+reset to unknown (`cpuload reset`) — never silently drift worse on its own
+— and a short observation window may simply not have caught the board's
+true best case yet, so treat an early reading as provisional.
 
 ---
 
