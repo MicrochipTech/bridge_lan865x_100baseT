@@ -53,6 +53,7 @@
 #include "configuration.h"
 #include "definitions.h"
 #include "sys_tasks.h"
+#include "cpuload.h"          /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3) */
 
 
 
@@ -72,38 +73,54 @@
 */
 void SYS_Tasks ( void )
 {
-    /* Maintain system services */
-    
+    /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3):
+       CPULOAD_Enter()/CPULOAD_Exit() bracket each call below and the whole pass
+       (see docs/mcc-generated-code-patches.md item 12) - no-ops unless 'cpuload on'.
+       CPULOAD_LivePoll() must run first, before SYS_CMD_Tasks() and before the
+       CPULOAD_Enter() below - see its own comment in cpuload.h for why. */
+    CPULOAD_LivePoll();
+    CPULOAD_Enter(CPULOAD_SLOT_TOTAL);
 
+    /* Maintain system services */
+
+
+CPULOAD_Enter(CPULOAD_SLOT_SYS_CMD);
 SYS_CMD_Tasks();
+CPULOAD_Exit(CPULOAD_SLOT_SYS_CMD);
 
 
 
 
     /* Maintain Device Drivers */
+CPULOAD_Enter(CPULOAD_SLOT_MIIM);
        DRV_MIIM_OBJECT_BASE_Default.miim_Tasks(sysObj.drvMiim_0);
+CPULOAD_Exit(CPULOAD_SLOT_MIIM);
 
 
 
 
     /* Maintain Middleware & Other Libraries */
-    
+
+CPULOAD_Enter(CPULOAD_SLOT_TCPIP);
    TCPIP_STACK_Task(sysObj.tcpip);
+CPULOAD_Exit(CPULOAD_SLOT_TCPIP);
 
 
 
+CPULOAD_Enter(CPULOAD_SLOT_NET_PRES);
 NET_PRES_Tasks(sysObj.netPres);
+CPULOAD_Exit(CPULOAD_SLOT_NET_PRES);
 
 
 
 
     /* Maintain the application's state machine. */
         /* Call Application task APP. */
+CPULOAD_Enter(CPULOAD_SLOT_APP);
     APP_Tasks();
+CPULOAD_Exit(CPULOAD_SLOT_APP);
 
-
-
-
+    CPULOAD_Exit(CPULOAD_SLOT_TOTAL);
 }
 
 /*******************************************************************************

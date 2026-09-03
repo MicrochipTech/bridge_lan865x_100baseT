@@ -137,6 +137,109 @@ CPU can reach, including peripheral registers and the stack; a wrong address
 can hang or reset the board. Useful for experiments, not for routine
 configuration — `env` and the `lan` commands exist for that.
 
+### `cpuload on|off|stats|reset|live`
+Cycle-accurate CPU-load profiling using the Cortex-M4 DWT cycle counter, in
+two sections: the bare-metal round-robin main loop (`SYS_Tasks()` in
+`tasks.c`, one slot per polled call) and every one of this board's 6 actual
+interrupt handlers (`DMAC_0`, `DMAC_1`, the LAN865x/TC6 SPI driver, the
+console UART, `GMAC`/eth1, the `SYS_TIME` tick — `interrupts.c`'s vector
+table is repointed at wrappers around each real handler, see
+`docs/mcc-generated-code-patches.md` item 13). One shared on/off arms and
+disables both sections together. Off by default — arming it costs a per-call
+flag check on the main loop and one small fixed indirection per interrupt,
+nothing while disabled. This is a finer-grained companion to `stats`' "main
+loop: N cycles/s" counter, not a replacement for it.
+
+- `cpuload on` — resets all counters, arms the DWT cycle counter, starts
+  recording.
+- `cpuload off` — stops recording; the counters keep their last values so they
+  can still be read.
+- `cpuload reset` — clears counters without changing on/off state.
+- `cpuload stats` (or no argument) — prints the table below, always in cycles.
+- `cpuload live` — the same table, redrawn in place once a second: the cursor
+  jumps up by the table's own fixed height (`\x1b[<N>A`, then `\r\x1b[J`) and
+  overwrites it — no scrolling, needs a real terminal such as TeraTerm, not a
+  line-oriented tool. (An earlier version used VT100 "save/restore cursor"
+  instead, which only works until the terminal scrolls once — it broke the
+  moment the table grew past one screenful. The fixed-height relative move
+  used now keeps working regardless of how much the terminal has scrolled —
+  but only if every printed line actually fits the terminal's width: a line
+  that wraps eats a second physical row the fixed cursor-up count doesn't
+  know about, drifting a little further every frame. Every line here is now
+  deliberately kept to ≤80 columns for exactly that reason (the `median`
+  line and the microseconds column header were the two that didn't,
+  originally — see `docs/cpuload-profiling-report.md` §10).
+  Auto-enables sampling if it wasn't already on. While live: `r` resets the
+  counters, `t`/`c` switch the displayed units between microseconds and
+  cycles, `q` stops the live view — all take effect immediately, no Enter
+  needed. Only one console can be live at a time. Console-agnostic (works the
+  same over Telnet), with one caveat: if a Telnet session starts
+  `cpuload live` and disconnects without pressing `q`, the board keeps that
+  console "live" (harmlessly — it just means nothing else can start a new
+  live view until the board is reset) until something else takes it over.
+
+```
+cpuload: ENABLED (DWT cycle counter, 120.0MHz core clock)
+  slot        n          min        max       mean     median  (cycles)
+-- main loop --
+  sys_cmd     564879     235        1586      246      242    
+  miim        564880     177        3532      186      184    
+  tcpip       564880     657        24332     723      674    
+  net_pres    564880     172        1184      179      177    
+  app         564880     302        1488      319      314    
+  TOTAL       564879     1937       25880     2042     1976   
+-- interrupts --
+  isr_dmac0   56         144        145       144      145    
+  isr_dmac1   56         530        583       562      567    
+  isr_spi     (no samples yet)
+  isr_usart   175        146        231       191      189    
+  isr_gmac    46         237        237       237      237    
+  isr_tc0     20387      523        898       652      671    
+TOTAL: mean 2042 cycles (17 us) per pass -> avg 58765 loops/s
+CPU load: interrupts 1%, tasks 99%, total 100%
+median: last <=128 samples/slot - min/max/mean: since last reset
+```
+
+`min`/`max`/`mean` are exact and cover every sample since the last `on`/
+`reset`. `median` is only over the most recent ≤128 samples per slot (a ring
+buffer, sorted on demand) — cheap to keep, but it will not reflect a brief
+spike that happened long enough ago to have scrolled out of that window.
+`TOTAL` wraps the whole `SYS_Tasks()` pass, not a sixth call, and does **not**
+include interrupt time — the interrupt section is a separate breakdown, not
+folded into it.
+
+**`isr_spi` reading "(no samples yet)" is confirmed correct, not a bug** —
+this SPI bus (SERCOM0, the LAN865x) is configured with real DMA channels
+(`initialization.c`: `.dmaChannelTransmit = DRV_SPI_XMIT_DMA_CH_IDX0`,
+`.dmaChannelReceive = DRV_SPI_RCV_DMA_CH_IDX0`, not `SYS_DMA_CHANNEL_NONE`),
+so `drv_spi.c` always takes its DMA transfer path for this instance — the
+PLIB's own interrupt-driven `SERCOM0_SPI_WriteRead()` is present in the
+binary but never reached. The transfers really do complete via
+`isr_dmac0`/`isr_dmac1` (confirmed structurally: `SERCOM0_DMAC_ID_TX`/`_RX`
+match the `DMAC_CHCTRLA_TRIGSRC` values configured on those two channels).
+Verified two ways: reading the config source, and — since a real hardware
+breakpoint settles this kind of question outright — using `pyOCD`'s Python
+API interactively (the same tool `flash.bat` already uses) to confirm
+`SERCOM0_SPI_InterruptHandler` genuinely never runs. See
+`docs/cpuload-profiling-report.md` §9 for the full trail, including a
+methodology pitfall worth remembering: a breakpoint set on a *running* core
+without halting first silently never fires, on anything.
+
+**A caveat worth stating plainly:** since the DWT cycle counter never stops
+for an interrupt, time spent in one of the 6 interrupts above while a
+main-loop slot's bracket happens to be open is *also* still counted inside
+that main-loop slot's own number — nothing subtracts it back out. The
+interrupt section tells you roughly how much that could be; it is not netted
+against the main-loop figures automatically.
+
+**`CPU load: interrupts X%, tasks Y%, total Z%`** — the closest thing to
+an overall load figure this feature can honestly give. There is no idle task
+here to compare against (the bare-metal loop never sleeps), so a classic
+"busy vs. idle %" doesn't apply; this is instead a plain 2-way split of every
+cycle measured so far — interrupts vs. everything else — always summing to
+100%. A rising interrupt share is the clearest single signal that the board
+is under load.
+
 ---
 
 ## `env` — persistent configuration

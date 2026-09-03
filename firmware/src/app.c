@@ -44,6 +44,7 @@
 #include "noip_test.h"
 #include "testserver.h"
 #include "crashlog.h"
+#include "cpuload.h"
 #include "cmd_print.h"          /* CMD_PRINT/CMD_MSG - reply to pCmdIO, not always the serial console */
 #include "definitions.h"        /* sysObj - only for APP_PumpNetworkStack(), see its comment */
 #include "config/default/driver/miim/drv_miim.h"   /* boot banner: read eth1's PHY ID over MDIO */
@@ -312,6 +313,7 @@ static void test_help(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
     CMD_PRINT(pCmdIO, "  logstat                      - Show deferred log statistics\n\r");
     CMD_PRINT(pCmdIO, "  faultlog [clear]             - Show (or clear) the last recorded HardFault analysis\n\r");
     CMD_PRINT(pCmdIO, "  crashtest                    - Deliberately trigger a HardFault (tests faultlog)\n\r");
+    CMD_PRINT(pCmdIO, "  cpuload on|off|stats|reset|live - Per-task main-loop cycle profiling (default off)\n\r");
     CMD_PRINT(pCmdIO, "\n\rLAN865x registers, test modes, PLCA: see 'lanhelp'\n\r");
     CMD_PRINT(pCmdIO, "Port mirror/sniffer: see 'mirror'/'sniffer'. Raw frame test: see 'noip_send'.\n\r");
     CMD_PRINT(pCmdIO, "TCP echo server: see 'testserver'. Persistent config: see 'showenv'.\n\r");
@@ -449,6 +451,34 @@ static void cmd_crashtest(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
     (void)argc; (void)argv;
     CMD_PRINT(pCmdIO, "crashtest: triggering a HardFault now...\n\r");
     CRASHLOG_TriggerTestFault();
+}
+
+/* cpuload on|off|stats|reset|live - see cpuload.c. Default is off; 'stats'
+ * with no argument (or an unrecognized one) just prints current stats, same
+ * shape as 'faultlog [clear]' above. */
+static void cmd_cpuload(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
+    if (argc >= 2) {
+        if (strcmp(argv[1], "on") == 0) {
+            CPULOAD_Enable(true);
+            CMD_PRINT(pCmdIO, "cpuload: enabled, stats reset\n\r");
+            return;
+        }
+        if (strcmp(argv[1], "off") == 0) {
+            CPULOAD_Enable(false);
+            CMD_PRINT(pCmdIO, "cpuload: disabled\n\r");
+            return;
+        }
+        if (strcmp(argv[1], "reset") == 0) {
+            CPULOAD_Reset();
+            CMD_PRINT(pCmdIO, "cpuload: stats reset\n\r");
+            return;
+        }
+        if (strcmp(argv[1], "live") == 0) {
+            CPULOAD_LiveStart(pCmdIO);
+            return;
+        }
+    }
+    CPULOAD_PrintStats(pCmdIO);
 }
 
 static void my_dump(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
@@ -696,6 +726,7 @@ static const SYS_CMD_DESCRIPTOR s_cmdTbl[] = {
     {"logstat",      (SYS_CMD_FNC) cmd_logstat,      ": show deferred log statistics (total, pending, overflows)"},
     {"faultlog",     (SYS_CMD_FNC) cmd_faultlog,     ": show the last recorded HardFault analysis (faultlog [clear])"},
     {"crashtest",    (SYS_CMD_FNC) cmd_crashtest,    ": deliberately trigger a HardFault, to test faultlog"},
+    {"cpuload",      (SYS_CMD_FNC) cmd_cpuload,      ": per-task main-loop cycle profiling (cpuload on|off|stats|reset|live)"},
 };
 
 static bool Command_Init(void)

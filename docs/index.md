@@ -19,6 +19,7 @@ project was built, why particular decisions were made, and what was measured.
 | understand or re-apply a hand-patch to generated code | [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md), then [`../patches/README.md`](../patches/README.md) |
 | demo or interpret LAN8651 registers | [`register-tool-demo-examples.md`](register-tool-demo-examples.md) |
 | know what throughput to expect, and why | [`iperf_matrix_results.md`](iperf_matrix_results.md) |
+| know how much CPU headroom the main loop has, and how to measure it yourself | [`cpuload-profiling-report.md`](cpuload-profiling-report.md) |
 | see the firmware running on a board that has no 100BASE-TX PHY | [`three-board-rollout-report.md`](three-board-rollout-report.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
@@ -74,6 +75,16 @@ bridge and two T1S follower nodes: UDP rate search plus TCP, both directions
 per pair, with loss always read from the receiving side. Includes the
 `TC6_TX_ETH_MAX_SEGMENTS` finding — bridge-originated TCP failed outright at
 0.00 Mbit/s until the driver was allowed more than one segment per packet.
+
+### [`cpuload-profiling-report.md`](cpuload-profiling-report.md) — per-task CPU load, measured
+*2026-09-03.* How the `cpuload` command works (the DWT cycle counter, the six
+timed slots, why `median` and `min`/`max`/`mean` cover different windows), the
+exact bench procedure used to measure it (including a real firmware bug the
+test itself found — `cpuload reset` corrupting an in-flight timestamp — and a
+bench IP mismatch against `iperf_matrix_test.py`'s `DEVICES` table that
+invalidated the first "worst case" run), and the resulting numbers: quiet-bus
+baseline versus the bridge in sniffer mode under a genuine full 10 Mbit/s UDP
+flood between the two follower nodes.
 
 ### [`three-board-rollout-report.md`](three-board-rollout-report.md) — one image on three boards, measured
 *2026-09-02 and 2026-09-03.* The same firmware deployed to all three bench

@@ -42,11 +42,13 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 9 | `library\tcpip\src\tcpip_mac_bridge.c` — eth0/LAN865x RX length correction | T1S→100BASE-TX TCP forwarding stalls after the first near-MTU-size segment; legitimate large frames silently rejected (`failMtu`) | High — correctness, forwarding-path |
 | 10 | `driver\lan865x\src\dynamic\tc6\tc6-conf.h` — `TC6_TX_ETH_MAX_SEGMENTS` 1u → 3u | Any TCP payload the bridge's own stack sends (not merely forwards) out `eth0` silently fails, hitting the TCPIP Stack Assert | High — correctness, bridge-originated TCP |
 | 11 | `library\tcpip\src\tcpip_manager.c` — record the power state of an interface that failed to initialize | A MAC/PHY that is not physically fitted aborts the **entire** stack, taking the healthy interface, the MAC bridge, Telnet and LAN865x register access down with it | High — availability, unfitted-hardware only |
+| 12 | `tasks.c` — `CPULOAD_Enter()`/`CPULOAD_Exit()` hooks around each `SYS_Tasks()` call | Loses the `cpuload` command's per-task cycle profiling; nothing else changes | Low — diagnostic feature only |
+| 13 | `interrupts.c` — vector table repointed at `cpuload.c`'s `CPULOAD_ISR_*()` wrappers | Loses the `cpuload` command's per-interrupt cycle profiling; nothing else changes | Low — diagnostic feature only |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
 Recommended re-apply order after any `Generate Code` run: **1 first** (nothing else
 matters if the board can't boot), then rebuild/flash/confirm it boots at all, then
-**2–5, 7, 9–11** in any order, rebuild/flash/retest once more. **6** will simply fail
+**2–5, 7, 9–13** in any order, rebuild/flash/retest once more. **6** will simply fail
 to compile if missed, so the build itself catches it — no separate verification
 needed.
 
@@ -675,6 +677,128 @@ does have its 100BASE-TX PHY the second line reads
 no stack, no bridge, no Telnet, no register access, and only the bare serial
 commands that do not touch a network driver. Bridging itself is impossible
 either way with one port; what the patch preserves is everything else.
+
+---
+
+## 12. `tasks.c` — `CPULOAD_Enter()`/`CPULOAD_Exit()` hooks
+
+**Why:** `SYS_Tasks()` is the bare-metal build's round-robin main loop — a
+plain, unconditional, non-blocking sequence of `SYS_CMD_Tasks()`, the MIIM
+driver's `miim_Tasks()`, `TCPIP_STACK_Task()`, `NET_PRES_Tasks()`,
+`APP_Tasks()`. There is no RTOS and no idle task here, so per-task CPU load
+can only be measured by timing each call directly. `cpuload.c`/`.h` (plain
+user files, not MCC's concern) implement that via the Cortex-M4 DWT cycle
+counter, opt-in through the `cpuload` console command — but the timing hooks
+themselves have to sit around the calls inside `SYS_Tasks()`, which MCC owns.
+
+**What:** one include, a `CPULOAD_LivePoll()` call as the very first statement
+of the function, plus a `CPULOAD_Enter(slot)`/`CPULOAD_Exit(slot)` pair around
+each of the 5 calls and a `CPULOAD_SLOT_TOTAL` pair around the whole function
+body:
+
+```c
+#include "cpuload.h"
+...
+void SYS_Tasks ( void )
+{
+    CPULOAD_LivePoll();
+    CPULOAD_Enter(CPULOAD_SLOT_TOTAL);
+    ...
+    CPULOAD_Enter(CPULOAD_SLOT_SYS_CMD);
+    SYS_CMD_Tasks();
+    CPULOAD_Exit(CPULOAD_SLOT_SYS_CMD);
+    ... (same shape for MIIM, TCPIP, NET_PRES, APP) ...
+    CPULOAD_Exit(CPULOAD_SLOT_TOTAL);
+}
+```
+
+`CPULOAD_Enter()`/`CPULOAD_Exit()` are a single disabled-flag check each when
+`cpuload` is off (the default), so this costs nothing until armed.
+`CPULOAD_LivePoll()` drives the `cpuload live` view (`docs/cli-reference.md`):
+it has to run first, before `SYS_CMD_Tasks()`, so that while a console is
+live it can steal that console's pending `r`/`q` keystroke itself before
+`sys_command.c`'s own line reader gets a turn on the same pass — see the
+comment on `CPULOAD_LivePoll()` in `cpuload.h` for the full reasoning.
+
+**No MCC field exists for this** — it's a diagnostic hook, not configuration.
+
+**If lost:** `cpuload stats`/`cpuload live` show stale or zero data and `r`/
+`q` stop being read during a live view (the existing coarse `stats`' "main
+loop: N cycles/s" counter, in `app.c`, is unaffected either way — it doesn't
+live in MCC-generated code). No build failure, no runtime regression — this
+is purely a diagnostic feature.
+
+---
+
+## 13. `interrupts.c` — vector table repointed at `CPULOAD_ISR_*()` wrappers
+
+**Why:** the loop-task profiling above (item 12) only sees the round-robin
+main loop — interrupts run invisibly to it, and worse, since the DWT cycle
+counter never stops for an interrupt, any ISR that preempts an open
+loop-task bracket gets silently folded into that bracket's own number.
+`cpuload` needed a real per-interrupt breakdown. This board has 6 actual
+interrupt handlers (confirmed via `interrupts.c`'s vector table and the
+prototypes in `interrupts.h`, which `interrupts.c` already includes):
+
+| Vector(s) | Handler | What it's for |
+|---|---|---|
+| `DMAC_0` | `DMAC_0_InterruptHandler` | DMA channel 0 completion |
+| `DMAC_1` | `DMAC_1_InterruptHandler` | DMA channel 1 completion |
+| `SERCOM0_0/1/2/OTHER` (4 vectors, 1 handler) | `SERCOM0_SPI_InterruptHandler` | LAN865x/TC6 SPI driver, eth0 |
+| `SERCOM1_0/1/2/OTHER` (4 vectors, 1 handler) | `SERCOM1_USART_InterruptHandler` | console UART |
+| `GMAC` | `GMAC_InterruptHandler` | eth1 |
+| `TC0` | `TC0_TimerInterruptHandler` | the `SYS_TIME` tick |
+
+Editing all 5 peripheral-driver files that implement these handlers would
+mean bracketing every early-return path inside each one, and 5 more
+hand-patch surfaces. Instead, `interrupts.c`'s vector table already
+indirects every ISR through one designated-initializer struct — so 6 tiny
+pass-through wrappers in `cpuload.c` (`Enter(ISR slot)` / the real handler /
+`Exit(ISR slot)`) go in the vector table instead, and the 5 peripheral-driver
+files stay completely untouched.
+
+**What:** one include, plus the 12 relevant assignment lines repointed at
+the wrappers (`SERCOM0`/`SERCOM1` each map 4 vectors to one shared handler
+function, so 4 lines apiece):
+
+```c
+#include "cpuload.h"
+...
+.pfnDMAC_0_Handler        = CPULOAD_ISR_DMAC0,   /* was: DMAC_0_InterruptHandler */
+.pfnDMAC_1_Handler        = CPULOAD_ISR_DMAC1,   /* was: DMAC_1_InterruptHandler */
+.pfnSERCOM0_0_Handler     = CPULOAD_ISR_SPI,     /* was: SERCOM0_SPI_InterruptHandler */
+.pfnSERCOM0_1_Handler     = CPULOAD_ISR_SPI,     /* was: SERCOM0_SPI_InterruptHandler */
+.pfnSERCOM0_2_Handler     = CPULOAD_ISR_SPI,     /* was: SERCOM0_SPI_InterruptHandler */
+.pfnSERCOM0_OTHER_Handler = CPULOAD_ISR_SPI,     /* was: SERCOM0_SPI_InterruptHandler */
+.pfnSERCOM1_0_Handler     = CPULOAD_ISR_USART,   /* was: SERCOM1_USART_InterruptHandler */
+.pfnSERCOM1_1_Handler     = CPULOAD_ISR_USART,   /* was: SERCOM1_USART_InterruptHandler */
+.pfnSERCOM1_2_Handler     = CPULOAD_ISR_USART,   /* was: SERCOM1_USART_InterruptHandler */
+.pfnSERCOM1_OTHER_Handler = CPULOAD_ISR_USART,   /* was: SERCOM1_USART_InterruptHandler */
+.pfnGMAC_Handler          = CPULOAD_ISR_GMAC,    /* was: GMAC_InterruptHandler */
+.pfnTC0_Handler           = CPULOAD_ISR_TC0,     /* was: TC0_TimerInterruptHandler */
+```
+
+Same one shared `cpuload on`/`off` arms and disables the interrupt slots
+together with the loop-task ones — not a second toggle.
+
+**Overhead, stated plainly:** unlike the loop-task hooks (inlined directly
+into `tasks.c`, genuinely free when off), these wrappers add one small fixed
+function-call indirection on *every* interrupt regardless of on/off state,
+since the vector table always points at the wrapper — only the profiling
+*inside* it becomes a no-op when disabled. Negligible next to the handler's
+own cost (confirmed on hardware: normal ping/forwarding/console operation
+unaffected with profiling armed), but real.
+
+**Known, deliberate limitation:** interrupt time that preempts an open
+loop-task bracket is still folded into that loop-task's own number — nothing
+subtracts it back out automatically. The new ISR numbers show roughly how
+much that could be; they don't get netted against the loop-task ones.
+
+**No MCC field exists for this** — it's a diagnostic hook, not configuration.
+
+**If lost:** `cpuload stats`/`cpuload live` show all 6 interrupt rows as "no
+samples yet" forever; the loop-task rows and everything else are unaffected.
+No build failure, no runtime regression — purely a diagnostic feature.
 
 ---
 

@@ -1,0 +1,68 @@
+diff --git a/firmware/src/config/default/interrupts.c b/firmware/src/config/default/interrupts.c
+index f70445c..8f68daf 100644
+--- a/firmware/src/config/default/interrupts.c
++++ b/firmware/src/config/default/interrupts.c
+@@ -52,6 +52,7 @@
+ #include "device_vectors.h"
+ #include "interrupts.h"
+ #include "definitions.h"
++#include "cpuload.h"          /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3) */
+ 
+ 
+ 
+@@ -264,8 +265,12 @@ const H3DeviceVectors exception_table=
+     .pfnFREQM_Handler              = FREQM_Handler,
+     .pfnNVMCTRL_0_Handler          = NVMCTRL_0_Handler,
+     .pfnNVMCTRL_1_Handler          = NVMCTRL_1_Handler,
+-    .pfnDMAC_0_Handler             = DMAC_0_InterruptHandler,
+-    .pfnDMAC_1_Handler             = DMAC_1_InterruptHandler,
++    /* HAND-PATCH to MCC-generated code, documented exception (CLAUDE.md section 3):
++       these 12 vectors point at cpuload.c's CPULOAD_ISR_*() wrappers instead of the
++       real handlers - see docs/mcc-generated-code-patches.md item 13. Each wrapper
++       calls straight through to the handler named here; no-op unless 'cpuload on'. */
++    .pfnDMAC_0_Handler             = CPULOAD_ISR_DMAC0,       /* was: DMAC_0_InterruptHandler */
++    .pfnDMAC_1_Handler             = CPULOAD_ISR_DMAC1,       /* was: DMAC_1_InterruptHandler */
+     .pfnDMAC_2_Handler             = DMAC_2_Handler,
+     .pfnDMAC_3_Handler             = DMAC_3_Handler,
+     .pfnDMAC_OTHER_Handler         = DMAC_OTHER_Handler,
+@@ -276,14 +281,14 @@ const H3DeviceVectors exception_table=
+     .pfnEVSYS_OTHER_Handler        = EVSYS_OTHER_Handler,
+     .pfnPAC_Handler                = PAC_Handler,
+     .pfnRAMECC_Handler             = RAMECC_Handler,
+-    .pfnSERCOM0_0_Handler          = SERCOM0_SPI_InterruptHandler,
+-    .pfnSERCOM0_1_Handler          = SERCOM0_SPI_InterruptHandler,
+-    .pfnSERCOM0_2_Handler          = SERCOM0_SPI_InterruptHandler,
+-    .pfnSERCOM0_OTHER_Handler      = SERCOM0_SPI_InterruptHandler,
+-    .pfnSERCOM1_0_Handler          = SERCOM1_USART_InterruptHandler,
+-    .pfnSERCOM1_1_Handler          = SERCOM1_USART_InterruptHandler,
+-    .pfnSERCOM1_2_Handler          = SERCOM1_USART_InterruptHandler,
+-    .pfnSERCOM1_OTHER_Handler      = SERCOM1_USART_InterruptHandler,
++    .pfnSERCOM0_0_Handler          = CPULOAD_ISR_SPI,         /* was: SERCOM0_SPI_InterruptHandler */
++    .pfnSERCOM0_1_Handler          = CPULOAD_ISR_SPI,         /* was: SERCOM0_SPI_InterruptHandler */
++    .pfnSERCOM0_2_Handler          = CPULOAD_ISR_SPI,         /* was: SERCOM0_SPI_InterruptHandler */
++    .pfnSERCOM0_OTHER_Handler      = CPULOAD_ISR_SPI,         /* was: SERCOM0_SPI_InterruptHandler */
++    .pfnSERCOM1_0_Handler          = CPULOAD_ISR_USART,       /* was: SERCOM1_USART_InterruptHandler */
++    .pfnSERCOM1_1_Handler          = CPULOAD_ISR_USART,       /* was: SERCOM1_USART_InterruptHandler */
++    .pfnSERCOM1_2_Handler          = CPULOAD_ISR_USART,       /* was: SERCOM1_USART_InterruptHandler */
++    .pfnSERCOM1_OTHER_Handler      = CPULOAD_ISR_USART,       /* was: SERCOM1_USART_InterruptHandler */
+     .pfnSERCOM2_0_Handler          = SERCOM2_0_Handler,
+     .pfnSERCOM2_1_Handler          = SERCOM2_1_Handler,
+     .pfnSERCOM2_2_Handler          = SERCOM2_2_Handler,
+@@ -314,7 +319,7 @@ const H3DeviceVectors exception_table=
+     .pfnUSB_SOF_HSOF_Handler       = USB_SOF_HSOF_Handler,
+     .pfnUSB_TRCPT0_Handler         = USB_TRCPT0_Handler,
+     .pfnUSB_TRCPT1_Handler         = USB_TRCPT1_Handler,
+-    .pfnGMAC_Handler               = GMAC_InterruptHandler,
++    .pfnGMAC_Handler               = CPULOAD_ISR_GMAC,        /* was: GMAC_InterruptHandler - HAND-PATCH, see above */
+     .pfnTCC0_OTHER_Handler         = TCC0_OTHER_Handler,
+     .pfnTCC0_MC0_Handler           = TCC0_MC0_Handler,
+     .pfnTCC0_MC1_Handler           = TCC0_MC1_Handler,
+@@ -337,7 +342,7 @@ const H3DeviceVectors exception_table=
+     .pfnTCC4_OTHER_Handler         = TCC4_OTHER_Handler,
+     .pfnTCC4_MC0_Handler           = TCC4_MC0_Handler,
+     .pfnTCC4_MC1_Handler           = TCC4_MC1_Handler,
+-    .pfnTC0_Handler                = TC0_TimerInterruptHandler,
++    .pfnTC0_Handler                = CPULOAD_ISR_TC0,         /* was: TC0_TimerInterruptHandler - HAND-PATCH, see above */
+     .pfnTC1_Handler                = TC1_Handler,
+     .pfnTC2_Handler                = TC2_Handler,
+     .pfnTC3_Handler                = TC3_Handler,

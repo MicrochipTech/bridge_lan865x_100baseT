@@ -969,6 +969,7 @@
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>
       <itemPath>../src/crashlog.c</itemPath>
+      <itemPath>../src/cpuload.c</itemPath>
     </logicalFolder>
   </logicalFolder>
   <projectmakefile>Makefile</projectmakefile>
