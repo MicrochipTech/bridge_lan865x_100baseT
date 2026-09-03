@@ -2403,4 +2403,59 @@ completed step — do not wait until the end of the session.
 
 ---
 
+## 2026-09-03
+
+### `apply_patches.py --check` false `FAILED` verdict for `telnet` under simultaneous stdarg.h + patch loss
+
+- Deliberately tested the patch-reapply mechanism end to end. Starting point: a
+  normal (incremental) Generate Code run that only corrected
+  `TCPIP_NETWORK_DEFAULT_GATEWAY_IDX1` (typo fix, `"192.168.0..1"` ->
+  `"192.168.0.1"`) left all 11 hand-patches intact
+  (`apply_patches.py --check` reported "All patches present"). Then
+  triggered MCC's toolbar dropdown **"Force Update on All"**, which rewrites
+  every generated file from its template regardless of model state (same
+  mechanism as the 2026-09-01 entry above).
+- `git status --short` confirmed exactly the 8 patch-protected files were
+  reverted (`plib_clock.c`, `drv_lan865x.h`, `drv_lan865x_api.c`,
+  `tc6-conf.h`, `initialization.c`, `tcpip_mac_bridge.c`,
+  `tcpip_manager.c`, `telnet.c`), plus `configuration.h` (expected - holds
+  the just-edited gateway field) and the usual MCC bookkeeping (`*.yml`,
+  `mcc-config.mc4`, `nbproject/configurations.xml`).
+- `apply_patches.py --check` reported 10 of 11 patches as `WOULD APPLY`
+  (clean) but flagged **`telnet` as `FAILED`** ("neither applies cleanly nor
+  is already applied"). Running `apply_patches.py` for real (no `--check`)
+  applied all 11 cleanly, including `telnet`; a re-run of `--check`
+  afterward showed `OK` across the board, and `git diff` for `telnet.c` came
+  back empty - byte-identical to the tracked, patched version.
+- **Root cause, in the tool itself, not in MCC's output:** `main()`
+  (`patches/apply_patches.py` lines 142-145) runs the `stdarg.h` fixes before
+  the `.patch` files, specifically because `telnet.patch`'s first hunk
+  anchors right next to the `#include <stdarg.h>` line (a comment at lines
+  137-141 already documents this ordering requirement). But
+  `apply_stdarg_fix()` (lines 105-118) does not write the file when
+  `dry_run` is true - it only *reports* `WOULD APPLY` (lines 114-115). So
+  when `--check` finds *both* the `stdarg.h` include and the rest of the
+  telnet patch missing at once - exactly what "Force Update on All"
+  produces - `apply_one_patch()` for `telnet.patch` still sees the on-disk
+  file without the include the patch context expects, and reports `FAILED`:
+  correct for the state on disk at that instant, misleading as a verdict on
+  whether a real run would succeed.
+- **Practical takeaway:** `apply_patches.py --check`'s `FAILED` verdict for
+  `telnet` is a false alarm specifically when item 6 (stdarg.h) and item 8
+  (telnet backpressure) are missing together - which is exactly what a full
+  "Force Update on All" produces, not a rare edge case. Always try the real
+  (non-`--check`) run before concluding a patch needs manual reapplication
+  per `mcc-generated-code-patches.md`; every other patch's check-mode result
+  matched its real-run outcome, only `telnet`'s combined-loss case did not.
+- Not fixed in the tool itself this session - `apply_stdarg_fix()` would
+  need to either write through `dry_run` (defeating the point of `--check`)
+  or have `apply_one_patch()` account for a stdarg fix that is merely
+  pending, e.g. by checking the patch context against the text with the
+  pending include inserted in-memory. Left as a known limitation:
+  `apply_patches.py`'s real run remains reliable end to end; only its
+  `--check` dry-run readout for `telnet` cannot be trusted in isolation when
+  `stdarg.h` is also missing at the same time.
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->
