@@ -65,25 +65,38 @@ from pathlib import Path
 import serial  # pyserial
 
 # --- Node configuration -----------------------------------------------
-# COM ports / IPs as verified live on this bench, 2026-08-31 (see
+# COM ports / IPs as verified live on this bench, 2026-09-03 (see
 # CLAUDE.md for the hardware setup). Override on the command line if your
-# bench differs. Note: FollowerA/FollowerB here are the SAME physical
-# boards as the reference bench this was developed against (COM10/COM23),
-# shared across projects on this T1S segment - COM10's eth0 MAC was
-# corrected to 00:04:25:CA:CE:DB on 2026-08-31 (collided with this
-# project's own Bridge eth0 MAC beforehand, a leftover from earlier,
-# unrelated work - see docs/session-log.md).
+# bench differs.
+#
+# All three boards now run the same bridge firmware and therefore have TWO
+# interfaces each - this used to be true of the Bridge alone, and the
+# per-destination interface handling below is no longer a special case for it.
+# What differs is which interface actually carries traffic:
+#
+#   "ip"        the address other nodes aim at
+#   "eth0"      T1S side, "eth1" 100BASE-TX side - the board's own addresses
+#   "toward_pc" the interface facing the PC's 100BASE-TX segment; for a
+#               follower that is still eth0, because it reaches the PC
+#               through the T1S segment and the bridge, not on its own eth1
 
 DEVICES = {
-    "Bridge":    {"port": "COM8",  "ip": "192.168.0.12"},  # eth1 (100BASE-TX side)
-    "FollowerA": {"port": "COM10", "ip": "192.168.0.201"},
-    "FollowerB": {"port": "COM23", "ip": "192.168.0.202"},
+    "Bridge": {
+        "port": "COM8", "ip": "192.168.0.12",
+        "eth0": "192.168.0.11", "eth1": "192.168.0.12",
+        "toward_pc": "eth1",   # wired straight to the PC
+    },
+    "FollowerA": {
+        "port": "COM10", "ip": "192.168.0.21",
+        "eth0": "192.168.0.21", "eth1": "192.168.0.22",
+        "toward_pc": "eth0",   # eth1 has a PHY but no cable
+    },
+    "FollowerB": {
+        "port": "COM23", "ip": "192.168.0.31",
+        "eth0": "192.168.0.31", "eth1": None,
+        "toward_pc": "eth0",   # no 100BASE-TX PHY fitted at all
+    },
 }
-# The Bridge is the only node with two interfaces. Its iperf CLIENT picks
-# "the default interface" unless told otherwise (iperfi), which is wrong
-# whenever the target sits on the other side - resolved per destination:
-BRIDGE_ETH0_IP = "192.168.0.11"  # T1S side - use this to reach a Follower
-BRIDGE_ETH1_IP = "192.168.0.12"  # 100BASE-TX side - use this to reach the PC
 PC_IP = "192.168.0.100"
 ALL_NODES = ["PC", "Bridge", "FollowerA", "FollowerB"]
 
@@ -190,7 +203,7 @@ def device_run_client(port, dest_ip, udp, rate_bps, duration, extra="", bind_ip=
 
     bind_ip pins the outgoing interface via "iperfi" first - only the
     Bridge has more than one interface, so this only matters for it
-    (see BRIDGE_ETH0_IP/BRIDGE_ETH1_IP): without it "iperf -c" silently
+    (see bind_addr_for): without it "iperf -c" silently
     uses "the default interface", which is wrong whenever the target
     sits on the Bridge's other side and the session just hangs forever
     waiting on an ARP that can never resolve.
@@ -338,10 +351,37 @@ def get_ip(name, cache):
     return cache[name]
 
 
+def dest_addr_for(src, dst, cache):
+    """Which of dst's addresses src should aim at.
+
+    Boards reach each other across the T1S segment, so a board addresses
+    another board's eth0 - aiming at a two-homed board's eth1 would ask the
+    traffic to take a detour it may not have. Only the PC comes in from the
+    100BASE-TX side, and it uses the canonical address.
+    """
+    if dst == "PC":
+        return PC_IP
+    if src == "PC":
+        return get_ip(dst, cache)
+    return DEVICES[dst]["eth0"]
+
+
+def bind_addr_for(src, dst):
+    """The source address to pin on src's iperf client, or None for the PC.
+
+    Every board here has two interfaces, so "the default interface" is only
+    the right one by accident - it has to be named per destination.
+    """
+    if src == "PC":
+        return None
+    dev = DEVICES[src]
+    return dev[dev["toward_pc"]] if dst == "PC" else dev["eth0"]
+
+
 def run_one(src, dst, udp, rate_bps, duration, iperf_exe, ip_cache):
     """Run a single client/server exchange src -> dst, return the parsed
     result from the DESTINATION's own report plus the raw text for the log."""
-    dst_ip = get_ip(dst, ip_cache)
+    dst_ip = dest_addr_for(src, dst, ip_cache)
 
     # The server's capture window must outlast the client by a comfortable
     # margin on both ends: the 0.8s head start below before the client
@@ -362,9 +402,7 @@ def run_one(src, dst, udp, rate_bps, duration, iperf_exe, ip_cache):
     if src == "PC":
         client_out = pc_run_client(iperf_exe, dst_ip, udp, rate_bps, duration)
     else:
-        bind_ip = None
-        if src == "Bridge":
-            bind_ip = BRIDGE_ETH1_IP if dst == "PC" else BRIDGE_ETH0_IP
+        bind_ip = bind_addr_for(src, dst)
         client_out = device_run_client(DEVICES[src]["port"], dst_ip, udp,
                                         rate_bps, duration, bind_ip=bind_ip)
 

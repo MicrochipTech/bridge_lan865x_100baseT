@@ -48,6 +48,8 @@ from pathlib import Path
 
 from iperf_matrix_test import (
     DEVICES,
+    bind_addr_for,
+    dest_addr_for,
     DeviceServerCapture,
     device_run_client,
     parse_device_report,
@@ -193,8 +195,10 @@ def analyze_tcp(tshark_exe, cap_file, src_ip, dst_ip, expected_bytes):
 
 
 def run_udp_test(src, dst, duration, tshark_exe, cap_dir, rate_bps):
-    src_ip = DEVICES[src]["ip"]
-    dst_ip = DEVICES[dst]["ip"]
+    # Both boards are two-homed now, so let the shared helpers name the
+    # addresses and the outgoing interface instead of assuming a default.
+    src_ip = bind_addr_for(src, dst)
+    dst_ip = dest_addr_for(src, dst, {})
     cap_file = cap_dir / f"udp_{src}_to_{dst}.pcapng"
 
     server = DeviceServerCapture(DEVICES[dst]["port"], udp=True, duration=duration + 3.0)
@@ -204,7 +208,8 @@ def run_udp_test(src, dst, duration, tshark_exe, cap_dir, rate_bps):
                        f"udp port {IPERF_PORT} and host {src_ip} and host {dst_ip}")
 
     client_out = device_run_client(DEVICES[src]["port"], dst_ip, udp=True,
-                                    rate_bps=rate_bps, duration=duration)
+                                    rate_bps=rate_bps, duration=duration,
+                                    bind_ip=src_ip)
     server.join(timeout=duration + 6)
     ts.wait(timeout=duration + 8)
 
@@ -247,8 +252,10 @@ def run_udp_test(src, dst, duration, tshark_exe, cap_dir, rate_bps):
 
 
 def run_tcp_test(src, dst, duration, tshark_exe, cap_dir):
-    src_ip = DEVICES[src]["ip"]
-    dst_ip = DEVICES[dst]["ip"]
+    # Both boards are two-homed now, so let the shared helpers name the
+    # addresses and the outgoing interface instead of assuming a default.
+    src_ip = bind_addr_for(src, dst)
+    dst_ip = dest_addr_for(src, dst, {})
     cap_file = cap_dir / f"tcp_{src}_to_{dst}.pcapng"
 
     server = DeviceServerCapture(DEVICES[dst]["port"], udp=False, duration=duration + 3.0)
@@ -258,6 +265,7 @@ def run_tcp_test(src, dst, duration, tshark_exe, cap_dir):
                        f"tcp port {IPERF_PORT} and host {src_ip} and host {dst_ip}")
 
     client_out = device_run_client(DEVICES[src]["port"], dst_ip, udp=False,
+                                    bind_ip=src_ip,
                                     rate_bps=None, duration=duration)
     server.join(timeout=duration + 6)
     ts.wait(timeout=duration + 8)
