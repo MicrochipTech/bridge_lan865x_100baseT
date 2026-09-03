@@ -113,14 +113,17 @@ the zero it was initialised with. The typo is not cosmetic.
 
 ### Boot output
 
-Captured in phase 1, hence the PLCA id 7 — the message format is the same in
-both phases. COM8 and COM10 report both interfaces:
+Captured on 2026-09-03. Each interface line now names the part fitted on it and
+its silicon revision, read from the hardware at boot rather than taken from the
+configuration — `DEVID` over the TC6 SPI link for eth0, the clause-22 PHY ID
+over MDIO for eth1. COM8 and COM10 report both:
 
 ```
 TCP/IP Stack: Initialization Ended - success
-eth0 (10BASE-T1S) : up
-eth1 (100BASE-TX) : up
-[PLCA] node ID set to 7 (NODE_CNT=8, reg=0x00000807)
+Build Timestamp   : Sep  3 2026 17:48:07
+eth0 (10BASE-T1S) : up    LAN8651 rev 1  (DEVID 0x00086511)
+eth1 (100BASE-TX) : up    Microchip LAN8740A model 0x11 rev 1  (OUI 0x0001F0, PHYID 0007:C111)
+[PLCA] node ID set to 5 (NODE_CNT=8, reg=0x00000805)
 ```
 
 COM23, with no 100BASE-TX PHY, comes up on one interface and says so:
@@ -129,14 +132,21 @@ COM23, with no 100BASE-TX PHY, comes up on one interface and says so:
 DRV_PHY operation error: -1
 DRV PHY init failed: -1
 TCP/IP Stack: Initialization Ended - success
-eth0 (10BASE-T1S) : up
+Build Timestamp   : Sep  3 2026 17:48:07
+eth0 (10BASE-T1S) : up    LAN8651 rev 1  (DEVID 0x00086511)
 eth1 (100BASE-TX) : NOT AVAILABLE
 Bridging is DISABLED - it needs both interfaces.
 Continuing on the surviving interface; check the PHY/daughter board.
 ```
 
-Without the patch the third line reads
+Without the patch the line after the build timestamp reads
 `Interface Initialization failed: 0x1 - Aborting!` and nothing else works.
+
+All three boards report the same LAN8651 revision, and the two that have a
+100BASE-TX card report the same PHY ID, so the parts are identical across the
+bench. COM10 is the instructive case: its PHY answers with its ID even though no
+cable is plugged in, because MDIO does not depend on link — which is what
+separates "PHY missing" from "cable missing" at a glance.
 
 ---
 
@@ -149,12 +159,16 @@ nothing back.
 | from ↓ / to → | `.100` PC | `.11` | `.12` | `.21` | `.22` | `.31` | `.32` |
 |---|---|---|---|---|---|---|---|
 | **PC** | — | no | **yes** | **yes** | no | **yes** | no |
-| **COM8** (bridge) | no | yes | yes | yes | yes | yes | no |
+| **COM8** (bridge) | yes* | yes | yes | yes* | yes* | yes* | no |
 | **COM10** (A) | yes | yes | yes | yes | `Sent 0` | yes | no |
 | **COM23** (B) | yes | yes | `Sent 0` | yes | yes | yes | no |
 
-**Board to board is essentially complete: 19 of 21 combinations work**,
-including every path across the T1S segment and straight through both bridges.
+`*` marks a target the bridge only reaches when the interface is named — see
+below; the earlier reading of this row left that out and understated it.
+
+**Board to board is essentially complete: 16 of 21 combinations answer**, and
+every one that does not is accounted for below. Every path across the T1S
+segment and straight through both bridges works.
 
 ### The two `Sent 0` cells are the interesting ones
 
@@ -179,24 +193,33 @@ runs in the same session gave identical results, but phase 1 with its different
 addressing *did* reach the equivalent of `.11`, so this is reproducible within a
 configuration and not across configurations. Not root-caused.
 
-### `COM8 → PC` is operator error, not a defect
+### Naming the interface is mandatory on the bridge, and the default is not stable
 
-The bridge's `ping` needs to be told which interface to use. Left to itself it
-picks eth0, the T1S side, where the PC is not:
+The bridge's `ping` has to be told which interface to use, because both of its
+interfaces sit in one subnet. That much was clear from the start. What the
+re-test on 2026-09-03 added is that **which** interface it picks by default is
+not fixed:
 
-```
-ping 192.168.0.100              Sent 4 requests, received 0 replies
-ping 192.168.0.100 i eth1       Sent 4 requests, received 4 replies
-ping 192.168.0.100 i eth0       Sent 4 requests, received 0 replies
-```
+| | reaching the PC (`.100`) | reaching a T1S peer (`.21`) |
+|---|---|---|
+| earlier run | only with `i eth1` | worked unqualified |
+| 2026-09-03 | only with `i eth1` | **only with `i eth0`** |
 
-So every `COM8 → PC` failure in this report — three in phase 1, one in the
-matrix above — is the missing `i eth1`. On a node with two interfaces in one
-subnet the interface argument is mandatory, exactly as `iperf` needs `iperfi`.
+Same firmware source, a full clean rebuild in between, nothing changed in the
+configuration. On the later run an unqualified `ping 192.168.0.21` returned
+`Sent 4 requests, received 0 replies` even in a freshly opened session, while
+`ping 192.168.0.21 i eth0` answered 4 of 4 — with `eth0 err=0` throughout, so
+nothing was failing to transmit. Forwarding was unaffected either way: in the
+same run the PC reached `.21` and `.31` straight through the bridge.
 
-The same default egress plausibly explains why each board answers the PC on
-only one address: a reply sourced from `.11` would be sent out eth0 as well.
-That connection is untested — the reply path cannot be pinned from the CLI.
+So the rule is stronger than "remember `i eth1` for the PC": **always name the
+interface when pinging from the bridge's own console**, in either direction.
+`iperf` is already immune, because `iperf_matrix_test.py` pins every client's
+source address per destination instead of trusting a default.
+
+That the default can flip also weakens, rather than supports, the earlier guess
+that default egress explains why each board answers the PC on only one address.
+The reply path still cannot be pinned from the CLI, so that stays untested.
 
 It does **not** explain `COM23 → .12`, which stays `Sent 0` even with
 `i eth0` given explicitly. That one is [defect 1](#6-defects-found) and has a
@@ -223,23 +246,24 @@ ping here pins the source with `-S 192.168.0.100`.
 
 ## 4. Throughput matrix
 
-Measured in **phase 2**, on the addressing in section 2 and with the same
-firmware as everything else here. `scripts/iperf_matrix_test.py`, UDP rate
+Re-measured on **2026-09-03** after a full clean rebuild, on the addressing in
+section 2, with all three boards flashed from that one image — each of them
+confirms the same build timestamp at boot. `scripts/iperf_matrix_test.py`, UDP rate
 search over 1-80 Mbit/s with a 2 % loss threshold, then one TCP measurement.
 UDP loss always read from the receiving side.
 
 | Direction | UDP max | TCP |
 |---|---|---|
-| PC → Bridge | 72.72 Mbit/s, 0.0 % | 18.85 Mbit/s |
-| Bridge → PC | 72.80 Mbit/s, 0.0 % | 11.50 Mbit/s |
-| PC → FollowerA | 2.00 Mbit/s, 0.0 % | 5.30 Mbit/s |
-| PC → FollowerB | 4.92 Mbit/s, 1.0 % | 5.62 Mbit/s |
+| PC → Bridge | 79.25 Mbit/s, 0.0 % | 15.72 Mbit/s |
+| Bridge → PC | 72.90 Mbit/s, 0.0 % | 11.70 Mbit/s |
+| PC → FollowerA | 7.99 Mbit/s, 0.0 % | 5.55 Mbit/s |
+| PC → FollowerB | 8.00 Mbit/s, 0.0 % | 5.56 Mbit/s |
 | Bridge → FollowerA | 9.42 Mbit/s, 0.0 % | 5.84 Mbit/s |
 | Bridge → FollowerB | 9.43 Mbit/s, 0.0 % | 5.85 Mbit/s |
-| FollowerA → PC | 9.46 Mbit/s, 0.0 % | 3.90 Mbit/s |
+| FollowerA → PC | 9.43 Mbit/s, 0.0 % | 3.89 Mbit/s |
 | FollowerA → Bridge | 9.42 Mbit/s, 0.0 % | 5.84 Mbit/s |
-| FollowerA → FollowerB | 9.44 Mbit/s, 0.0 % | 5.85 Mbit/s |
-| FollowerB → PC | 9.44 Mbit/s, 0.0 % | 3.89 Mbit/s |
+| FollowerA → FollowerB | 9.43 Mbit/s, 0.0 % | 5.85 Mbit/s |
+| FollowerB → PC | 9.44 Mbit/s, 0.0 % | 3.75 Mbit/s |
 | FollowerB → Bridge | 9.42 Mbit/s, 0.0 % | 5.83 Mbit/s |
 | FollowerB → FollowerA | 9.42 Mbit/s, 0.0 % | 5.83 Mbit/s |
 
@@ -263,11 +287,12 @@ defect 2 did not recur.
 
 ### The one figure that does not reproduce
 
-`PC → Follower` measured 7.96 and 8.00 Mbit/s in phase 1, and 2.00 and
-4.92 Mbit/s here — while every other direction reproduces to within
-0.04 Mbit/s. Same firmware, same path, same script settings; the rate search
-uses coarse steps (1, 2, 5, 8, ...), so the two runs disagree by one to two
-steps rather than marginally.
+`PC → Follower` has now been measured three times: 7.96 / 8.00 Mbit/s, then
+2.00 / 4.92, then 7.99 / 8.00 on the clean rebuild. Every other direction
+reproduces to within 0.04 Mbit/s across all three. Same firmware, same path,
+same script settings; the rate search uses coarse steps (1, 2, 5, 8, ...), so
+the middle run disagrees by one to two steps rather than marginally — and with
+two runs either side of it, it now looks like the outlier rather than the rule.
 
 This is the only direction whose bottleneck is the bridge forwarding *from* the
 fast segment *into* the slow one, so it depends on buffer availability at that
@@ -279,7 +304,7 @@ as indicative and the T1S-limited figures as solid.
 
 ## 5. Sniffer capture validation
 
-Measured in **phase 2**.
+Re-measured on **2026-09-03**.
 `scripts/sniffer_capture_test.py --udp-rate 10 --duration 5`: `sniffer` enabled
 on COM8, real traffic driven **directly between COM10 and COM23**, tshark
 recording on the PC's NIC. With sniffer on, COM8's own T1S transmitter is
@@ -289,8 +314,18 @@ disabled — it is a passive tap and not a participant in this traffic.
 |---|---|
 | UDP FollowerA → FollowerB | **COMPLETE** — 4018 captured, 4017 sent |
 | UDP FollowerB → FollowerA | **COMPLETE** — 4023 captured, 4022 sent |
-| TCP FollowerA → FollowerB | **COMPLETE** — 3 639 496 bytes / 2499 segments, 99.6 % of expected |
-| TCP FollowerB → FollowerA | **COMPLETE** — 3 638 036 bytes / 2497 segments, 99.8 % of expected |
+| TCP FollowerA → FollowerB | **COMPLETE** — 3 647 080 bytes / 2503 segments, 99.8 % of expected |
+| TCP FollowerB → FollowerA | **COMPLETE** — 3 639 780 bytes / 2498 segments, 99.9 % of expected |
+
+The first attempt of this run produced one empty capture: the
+`FollowerA → FollowerB` UDP file held nothing but its 496-byte header, and the
+script duly reported `INCOMPLETE`. The mirror counters from that same attempt
+read `rx_hook=18045 tx_submitted=18045 ack_ok=18045`, so the frames were
+mirrored and handed to the GMAC — the gap was on the capture side, most likely
+the session's first `tshark` start missing its window. An immediate re-run, with
+nothing changed, produced the four verdicts above. Worth keeping in mind as a
+harness caveat rather than a firmware finding: a single empty capture is not
+evidence against the mirror path, and the counters are what tell the two apart.
 
 The UDP runs asked for 10 Mbit/s and the link delivered 9.31 Mbit/s at 0 % loss
 by the sender's own count, i.e. the mirror path was exercised at the segment's
@@ -299,23 +334,23 @@ ceiling rather than at a comfortable fraction of it.
 Mirror counters on COM8 for the whole run:
 
 ```
-dbg: rx_hook=18027 passed_filter=18027 pool_empty=0 no_eth1=0 tx_submitted=18027
-dbg: ack_ok=18027 ack_fail=0 last_ack_res=0 max_len_submitted=1514 max_len_ok=1514
-dbg: truncated=13022 (frames cut to 1514 bytes before mirroring)
+dbg: rx_hook=18045 passed_filter=18045 pool_empty=0 no_eth1=0 tx_submitted=18045
+dbg: ack_ok=18045 ack_fail=0 last_ack_res=0 max_len_submitted=1514 max_len_ok=1514
+dbg: truncated=13032 (frames cut to 1514 bytes before mirroring)
 ```
 
-18 027 frames seen, 18 027 mirrored, 18 027 confirmed sent by the GMAC. No
+18 045 frames seen, 18 045 mirrored, 18 045 confirmed sent by the GMAC. No
 buffer exhaustion, no missing destination interface, no failed transmit.
 
 ### What the truncation counter actually does — now measured, not assumed
 
-13 022 of those frames were clamped to `MIRROR_SAFE_FRAME_LEN`, and the previous
-version of this report could only call the clamp harmless as a plausible
-inference. Checked directly against the captures this time:
+13 032 of those frames were clamped to `MIRROR_SAFE_FRAME_LEN`, which an earlier
+version of this report could only call harmless as a plausible inference.
+Checked directly against the captures instead:
 
 ```
-tcp_FollowerA_to_FollowerB.pcapng: lost_segment=0  ack_lost=0  retransmission=0
-tcp_FollowerB_to_FollowerA.pcapng: lost_segment=0  ack_lost=0  retransmission=0
+tcp_FollowerA_to_FollowerB.pcapng: lost_segment=0  retransmission=0
+tcp_FollowerB_to_FollowerA.pcapng: lost_segment=0  retransmission=0
 ```
 
 Wireshark finds **no gap at all** in either TCP stream, and the frame lengths
@@ -454,8 +489,9 @@ bridge firmware has no equivalent. Restoring it means reflashing
 
 What was tested against which board state, so nobody has to infer it from the
 sections above. Everything here — the ping matrix, the throughput matrix and the
-sniffer validation — was measured on the patched build `Sep  2 2026 21:53:50`
-with the phase-2 addressing, on the bench as it now stands.
+sniffer validation — was measured on build `Sep  3 2026 17:48:07`, produced by a
+full clean rebuild and flashed to all three boards, each of which reports that
+timestamp itself at boot. The phase-2 addressing applies throughout.
 
 | Board state | Ping | iperf | Sniffer capture |
 |---|---|---|---|
