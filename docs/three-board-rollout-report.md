@@ -91,19 +91,20 @@ packet arriving over T1S for its eth1 address is delivered locally.
 ### Between boards
 
 Every board reaches every other board's T1S address, and both followers reach
-the PC through COM8's bridge. Two directions fail reproducibly (measured three
-times each):
+the PC through COM8's bridge. One direction fails permanently:
 
 | Direction | Result |
 |---|---|
-| `COM8 → 192.168.0.100` (the PC) | 0 of 4 — although COM10 and COM23 reach the PC *through* COM8 |
-| `COM23 → 192.168.0.12` (COM8 eth1) | 0 of 4 — although `COM23 → .11` works and COM10 reaches `.12` |
+| `COM23 → 192.168.0.12` (COM8 eth1) | `Sent 0 requests` — while `COM23 → .11` and `COM10 → .12` both work |
 
-Both senders have two interfaces in one `/24`, and in both cases the failing
-target sits on the other interface's side. This is the same class of problem
-`iperf_matrix_test.py` already documents for the bridge's iperf client, which
-picks "the default interface" unless pinned with `iperfi`. **Stated as an
-observation, not a proven cause** — no interface-selection trace was taken.
+`COM8 → 192.168.0.100` also failed three times in a row during the first pass
+and then worked on every later attempt, so it is recorded as intermittent, not
+as a defect. Cause not established.
+
+The `.12` failure has a measured root cause — see
+[defect 1](#6-defects-found). It is not a routing or interface-selection
+problem: COM23 does not send anything at all, which is why nothing appears in
+a capture.
 
 ---
 
@@ -138,10 +139,14 @@ The PC → Follower direction tops out one step lower, at ~8 Mbit/s. The only
 hop unique to that path is the extra 100BASE-TX leg feeding into the bridge;
 not investigated further.
 
-`FollowerB → Bridge` is the genuine failure and matches the ping result: COM23
-cannot reach `192.168.0.12`. `FollowerB → FollowerA` initially reported FAIL
-too, but as a **follow-on effect** — see defect 2 below; re-run in isolation it
-delivers the 9.42 Mbit/s in the table.
+`FollowerB → Bridge` is the genuine failure, and it is structural rather than a
+throughput limit: the script addresses the bridge at `192.168.0.12`, which
+COM23 believes is one of its own addresses — see [defect 1](#6-defects-found).
+Addressing the bridge at `.11` instead would make this direction measurable.
+
+`FollowerB → FollowerA` initially reported FAIL as well, but only as a
+**follow-on effect** — see defect 2. Re-run in isolation it delivers the
+9.42 Mbit/s in the table.
 
 ---
 
@@ -190,12 +195,43 @@ firmware now performs:
 
 ## 6. Defects found
 
-**1. A host with two interfaces in one subnet can pick the wrong one.**
-`COM8 → 192.168.0.100` and `COM23 → 192.168.0.12` fail reproducibly while the
-reverse direction and every other node work. Both failing targets sit on the
-sender's *other* interface side. Impact: one of twelve throughput directions
-cannot be measured at all. Already known for the iperf client, where
-`iperfi` exists as the workaround; no equivalent for `ping`.
+**1. A board with a missing PHY is stuck on the compiled default IP for that
+interface — and that default is the bridge's own address.**
+
+`configuration.h` gives eth1 the default `192.168.0.12`. On COM23 that address
+is applied at initialization and then can never be changed, because the
+interface is torn down when its PHY is not found:
+
+```
+setip eth1 192.168.0.99 255.255.255.0
+No such interface is up
+```
+
+`setenv ip1` + `saveenv` hit the same wall silently: `showenv` reports the
+value that was asked for (`192.168.0.220`), while the running stack keeps
+`192.168.0.12`. Confirmed across a reset, and confirmed again after setting
+eth1 to a different subnet entirely — the change never reaches the stack.
+
+The consequence is that COM23 treats `192.168.0.12` as **its own** address, on
+an interface with no link, and refuses to put anything on the wire:
+
+```
+ping 192.168.0.12
+Ping: done. Sent 0 requests, received 0 replies.
+```
+
+`Sent 0` is the signature, and it is not specific to this case: `COM10 → .210`,
+its own eth1 address on a link-less interface, answers exactly the same way,
+whereas `COM23 → .202` — its own eth0 address, with link — replies 4 of 4.
+Forcing the interface (`ping 192.168.0.12 i eth0`) changes nothing, and a
+sniffer capture of the T1S segment shows no ARP request for `.12` ever being
+sent, while requests for `.201` from the same board are there.
+
+Impact: any board without its 100BASE-TX PHY can never reach the real bridge's
+eth1 address, so one of twelve throughput directions is structurally
+impossible. Workarounds, in order of preference: address the bridge by its
+eth0 address `.11` from the T1S side, give the bridge's eth1 an address other
+than the compiled default, or change the default in `configuration.h`.
 
 **2. A hung iperf session cannot be cleared, and poisons the next test.**
 `FollowerB → Bridge` targets `.12`, which COM23 cannot reach, so the session
