@@ -43,6 +43,7 @@
 #include "port_mirror.h"
 #include "noip_test.h"
 #include "testserver.h"
+#include "crashlog.h"
 #include "cmd_print.h"          /* CMD_PRINT/CMD_MSG - reply to pCmdIO, not always the serial console */
 #include "definitions.h"        /* sysObj - only for APP_PumpNetworkStack(), see its comment */
 #include "config/default/driver/miim/drv_miim.h"   /* boot banner: read eth1's PHY ID over MDIO */
@@ -309,6 +310,8 @@ static void test_help(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
     CMD_PRINT(pCmdIO, "  poke <addr> <val> [size]     - Write a single value (size=1|2|4)\n\r");
     CMD_PRINT(pCmdIO, "  logclear                     - Clear deferred packet log buffer\n\r");
     CMD_PRINT(pCmdIO, "  logstat                      - Show deferred log statistics\n\r");
+    CMD_PRINT(pCmdIO, "  faultlog [clear]             - Show (or clear) the last recorded HardFault analysis\n\r");
+    CMD_PRINT(pCmdIO, "  crashtest                    - Deliberately trigger a HardFault (tests faultlog)\n\r");
     CMD_PRINT(pCmdIO, "\n\rLAN865x registers, test modes, PLCA: see 'lanhelp'\n\r");
     CMD_PRINT(pCmdIO, "Port mirror/sniffer: see 'mirror'/'sniffer'. Raw frame test: see 'noip_send'.\n\r");
     CMD_PRINT(pCmdIO, "TCP echo server: see 'testserver'. Persistent config: see 'showenv'.\n\r");
@@ -429,6 +432,23 @@ static void cmd_logstat(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
         (unsigned)FRAME_DATA_POOL_SIZE,
         (unsigned)PKT_LOG_MAX_FRAMES,
         (unsigned)PKT_LOG_MAX_FRAME_SIZE);
+}
+
+static void cmd_faultlog(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
+    if ((argc >= 2) && (strcmp(argv[1], "clear") == 0)) {
+        CRASHLOG_ClearRecord(pCmdIO);
+        return;
+    }
+    CRASHLOG_PrintRecord(pCmdIO);
+}
+
+/* Test-only: deliberately triggers a HardFault to exercise crashlog.c end to
+ * end - see CRASHLOG_TriggerTestFault()'s comment for why it uses "udf"
+ * rather than an invalid address. */
+static void cmd_crashtest(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
+    (void)argc; (void)argv;
+    CMD_PRINT(pCmdIO, "crashtest: triggering a HardFault now...\n\r");
+    CRASHLOG_TriggerTestFault();
 }
 
 static void my_dump(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
@@ -674,6 +694,8 @@ static const SYS_CMD_DESCRIPTOR s_cmdTbl[] = {
     {"poke", (SYS_CMD_FNC) cmd_mem_poke, ": write a single value (poke <addr_hex> <value_hex> [size=1|2|4])"},
     {"logclear",     (SYS_CMD_FNC) cmd_logclear,     ": clear deferred packet log buffer"},
     {"logstat",      (SYS_CMD_FNC) cmd_logstat,      ": show deferred log statistics (total, pending, overflows)"},
+    {"faultlog",     (SYS_CMD_FNC) cmd_faultlog,     ": show the last recorded HardFault analysis (faultlog [clear])"},
+    {"crashtest",    (SYS_CMD_FNC) cmd_crashtest,    ": deliberately trigger a HardFault, to test faultlog"},
 };
 
 static bool Command_Init(void)
@@ -1022,6 +1044,7 @@ void APP_Tasks ( void )
              * over SPI and MDIO. banner_tasks() finishes that over the next few
              * main-loop passes and prints them - see its section above. */
             SYS_CONSOLE_PRINT("Build Timestamp   : "__DATE__" "__TIME__"\n\r");
+            CRASHLOG_PrintIfPresent();   /* if the previous boot ended in a HardFault, show it now */
             banner_start(TCPIP_STACK_NetIsUp(eth0_net_hd),
                          TCPIP_STACK_NetIsUp(eth1_net_hd));
             env_apply();   /* push the persisted network config into the stack (once, stack is up) */
