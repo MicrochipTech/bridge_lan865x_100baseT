@@ -2097,23 +2097,16 @@ Example commands:
 
                 start = time.time()
                 chunks = []
-                idle = 0
 
                 while time.time() - start < timeout_ms / 1000.0:
                     try:
                         port, kind, payload = self.cmd_response_q.get(timeout=0.01)
                     except queue.Empty:
-                        # Only give up once something has already arrived -- otherwise
-                        # the first pass wouldn't wait for the device at all.
-                        idle += 1
-                        if chunks and idle > 4:
-                            break
                         continue
 
                     if kind != "data":
                         continue
                     chunks.append(payload.decode("latin-1", "ignore"))
-                    idle = 0
                     text = "".join(chunks)
                     # Done as soon as the marker is present AND the line has been
                     # completed -- an "OK:" without a line ending is only the beginning.
@@ -2121,6 +2114,21 @@ Example commands:
                         pos = text.find(marker)
                         if pos >= 0 and "\n" in text[pos:]:
                             return text
+                    # Also done once the CLI has re-printed its "> " prompt on its own
+                    # line - the definitive end-of-response marker, independent of what
+                    # the command actually prints. This replaces an earlier idle-based
+                    # cutoff (return once ~40ms passed with no new chunk) that was wrong
+                    # over Telnet: 'showenv' legitimately arrives in two TCP segments
+                    # with the eth0/eth1/mac/plca/mirror/sniffer lines up to a full
+                    # second behind the identity line - the idle cutoff fired in that
+                    # gap and truncated the response to the identity line alone, which
+                    # then made every field in bridge_gui's env parser come back
+                    # unmatched (found stays 0) - the "Command failed" dialog on Read
+                    # Environment, confirmed 2026-09-04. Serial does not show the gap,
+                    # which is why the same read worked over the COM port.
+                    last_line = text.replace("\r", "").rstrip("\n").rsplit("\n", 1)[-1].strip()
+                    if last_line == ">":
+                        return text
 
                 return "".join(chunks)
             finally:

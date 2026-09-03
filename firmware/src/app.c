@@ -45,6 +45,7 @@
 #include "testserver.h"
 #include "crashlog.h"
 #include "cpuload.h"
+#include "leds.h"
 #include "cmd_print.h"          /* CMD_PRINT/CMD_MSG - reply to pCmdIO, not always the serial console */
 #include "definitions.h"        /* sysObj - only for APP_PumpNetworkStack(), see its comment */
 #include "config/default/driver/miim/drv_miim.h"   /* boot banner: read eth1's PHY ID over MDIO */
@@ -314,6 +315,7 @@ static void test_help(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
     CMD_PRINT(pCmdIO, "  faultlog [clear]             - Show (or clear) the last recorded HardFault analysis\n\r");
     CMD_PRINT(pCmdIO, "  crashtest                    - Deliberately trigger a HardFault (tests faultlog)\n\r");
     CMD_PRINT(pCmdIO, "  cpuload on|off|stats|reset|live - Per-task main-loop cycle profiling (default off)\n\r");
+    CMD_PRINT(pCmdIO, "  led on|off                   - Turn the onboard LED1 (PC21) on or off\n\r");
     CMD_PRINT(pCmdIO, "\n\rLAN865x registers, test modes, PLCA: see 'lanhelp'\n\r");
     CMD_PRINT(pCmdIO, "Port mirror/sniffer: see 'mirror'/'sniffer'. Raw frame test: see 'noip_send'.\n\r");
     CMD_PRINT(pCmdIO, "TCP echo server: see 'testserver'. Persistent config: see 'showenv'.\n\r");
@@ -479,6 +481,23 @@ static void cmd_cpuload(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
         }
     }
     CPULOAD_PrintStats(pCmdIO);
+}
+
+/* led on|off - see leds.c for the pin (PC21) and polarity. */
+static void cmd_led(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv) {
+    if (argc >= 2) {
+        if (strcmp(argv[1], "on") == 0) {
+            LEDS_Led1Set(true);
+            CMD_PRINT(pCmdIO, "led: LED1 on\n\r");
+            return;
+        }
+        if (strcmp(argv[1], "off") == 0) {
+            LEDS_Led1Set(false);
+            CMD_PRINT(pCmdIO, "led: LED1 off\n\r");
+            return;
+        }
+    }
+    CMD_PRINT(pCmdIO, "usage: led on|off\n\r");
 }
 
 static void my_dump(SYS_CMD_DEVICE_NODE* pCmdIO, int argc, char** argv) {
@@ -727,6 +746,7 @@ static const SYS_CMD_DESCRIPTOR s_cmdTbl[] = {
     {"faultlog",     (SYS_CMD_FNC) cmd_faultlog,     ": show the last recorded HardFault analysis (faultlog [clear])"},
     {"crashtest",    (SYS_CMD_FNC) cmd_crashtest,    ": deliberately trigger a HardFault, to test faultlog"},
     {"cpuload",      (SYS_CMD_FNC) cmd_cpuload,      ": per-task main-loop cycle profiling (cpuload on|off|stats|reset|live)"},
+    {"led",          (SYS_CMD_FNC) cmd_led,          ": turn the onboard LED1 (PC21) on or off (led on|off)"},
 };
 
 static bool Command_Init(void)
@@ -770,6 +790,7 @@ void APP_Initialize ( void )
     SYS_TIME_TimerStart(timerHandle);
 
     Command_Init();
+    LEDS_Initialize();
     LAN865X_DIAG_Initialize();
     NOIP_Initialize();
     TESTSERVER_Initialize();

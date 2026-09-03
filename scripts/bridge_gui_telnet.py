@@ -2105,23 +2105,16 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
                 start = time.time()
                 chunks = []
-                idle = 0
 
                 while time.time() - start < timeout_ms / 1000.0:
                     try:
                         port, kind, payload = self.cmd_response_q.get(timeout=0.01)
                     except queue.Empty:
-                        # Only bail out once something has already arrived -- otherwise
-                        # the very first pass wouldn't wait for the device at all.
-                        idle += 1
-                        if chunks and idle > 4:
-                            break
                         continue
 
                     if kind != "data":
                         continue
                     chunks.append(payload.decode("latin-1", "ignore"))
-                    idle = 0
                     text = "".join(chunks)
                     # Done once the marker is there AND the line is complete -- an
                     # "OK:" without a line ending is only the beginning.
@@ -2129,6 +2122,20 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                         pos = text.find(marker)
                         if pos >= 0 and "\n" in text[pos:]:
                             return text
+                    # Also done once the CLI has re-printed its "> " prompt on its own
+                    # line - the definitive end-of-response marker, independent of what
+                    # the command actually prints. This replaces an earlier idle-based
+                    # cutoff (return once ~40ms passed with no new chunk) that was wrong
+                    # over Telnet: 'showenv' legitimately arrives in two TCP segments,
+                    # with the eth0/eth1/mac/plca/mirror/sniffer lines up to a full
+                    # second behind the identity line - the idle cutoff fired in that
+                    # gap and truncated the response to the identity line alone, which
+                    # then made every field in the env parser come back unmatched
+                    # (found stays 0) - the "Command failed" dialog on Read Environment
+                    # against 192.168.0.21 and 192.168.0.32, confirmed 2026-09-04.
+                    last_line = text.replace("\r", "").rstrip("\n").rsplit("\n", 1)[-1].strip()
+                    if last_line == ">":
+                        return text
 
                 return "".join(chunks)
             finally:
@@ -2145,7 +2152,13 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         self.set_status("Reading bridge parameters...")
 
         def worker():
-            output = self.send_command_via_link("showenv", timeout_ms=1500)
+            # 5000ms, not the usual ~1000ms: 'showenv' reaching a Follower has to cross
+            # the T1S hop through the Bridge's own L2 forwarding, and that path has been
+            # measured (2026-09-04) sending the eth0/eth1/mac/plca/mirror/sniffer lines
+            # up to ~1s behind the identity line, sometimes with no gap at all - PLCA
+            # cycle timing under bus load, not a fixed latency. A Bridge reached
+            # directly (wired straight to the PC, e.g. 192.168.0.12) never showed this.
+            output = self.send_command_via_link("showenv", timeout_ms=5000)
             # Identity first, and the values are then interpreted against EXACTLY this
             # entry. Otherwise the GUI shows filled-in fields under a line that says the
             # environment is unknown -- both from the same response, and contradictory.
@@ -2184,7 +2197,7 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
             return
 
         if not self.env_identity:
-            out = self.send_command_via_link("showenv", timeout_ms=1500)
+            out = self.send_command_via_link("showenv", timeout_ms=5000)  # see read_all_bridge()
             self.env_identity = self.parse_env_identity(out)
             self.env_identity_var.set(self.env_identity_line())
 
@@ -2229,7 +2242,7 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
             log.append(f"> {persist_cmd}\n{self.clean_response(persist_cmd, out)}")
             # Afterwards read back what's actually stored - a write confirmation is
             # not proof that the device actually accepted the value.
-            check = self.send_command_via_link("showenv", timeout_ms=1500)
+            check = self.send_command_via_link("showenv", timeout_ms=5000)  # see read_all_bridge()
             self.result_queue.put(("env_identity", self.parse_env_identity(check)))
             for key in self.bridge_fields:
                 value = self.parse_showenv(check, key)

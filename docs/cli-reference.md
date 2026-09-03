@@ -273,6 +273,26 @@ reset to unknown (`cpuload reset`) — never silently drift worse on its own
 — and a short observation window may simply not have caught the board's
 true best case yet, so treat an early reading as provisional.
 
+### `led on|off`
+Turns the SAM E54 Curiosity Ultra's onboard LED1 (PC21) on or off.
+
+```
+> led on
+led: LED1 on
+> led off
+led: LED1 off
+```
+
+Not an MCC-assigned pin: this project never configured either onboard LED
+through MCC's Pin Configurator (`pin_configurations.csv` has no GPIO role
+for PC21), so `firmware/src/leds.c` drives it directly via `PORT_REGS`, the
+same style MCC itself uses for `LAN865x_RESET_Set()`/`_Clear()`. The pin and
+polarity come from the board's schematic PDF, not the silkscreen or memory:
+LED1 (D400) is net `USER_LED0` on PC21, wired `VCC_3P3V -> R467 (330R) ->
+D400 -> PC21` - the GPIO sinks current to light it, so it is active-low
+(`led on` drives PC21 low). LED2 (D401, net `USER_LED2`, PA16) is wired the
+same way but unused here.
+
 ---
 
 ## `env` — persistent configuration

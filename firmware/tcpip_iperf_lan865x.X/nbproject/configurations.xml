@@ -970,6 +970,7 @@
       <itemPath>../src/testserver.c</itemPath>
       <itemPath>../src/crashlog.c</itemPath>
       <itemPath>../src/cpuload.c</itemPath>
+      <itemPath>../src/leds.c</itemPath>
     </logicalFolder>
   </logicalFolder>
   <projectmakefile>Makefile</projectmakefile>
