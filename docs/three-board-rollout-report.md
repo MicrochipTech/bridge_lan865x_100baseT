@@ -54,10 +54,12 @@ patch is enough for both.
 
 The bench was set up twice. Phase 1 kept the addresses the boards had carried
 as followers; phase 2 started from fully erased MCUs to see what the firmware
-seeds on its own, and re-addressed the boards into a tidier block. The
-throughput and capture measurements (sections 4 and 5) are from phase 1, the
-reachability matrix (section 3) from phase 2. Only the labels differ — the
-topology and the hardware are the same throughout.
+seeds on its own, and re-addressed the boards into a tidier block. **Every
+measurement reported below — sections 3, 4 and 5 — is from phase 2**; phase 1 is
+kept here because the erase-and-reseed step in between is itself a result
+(see [below](#what-a-fully-erased-board-writes-into-the-eeprom-by-itself)), and
+because section 4 compares the two runs where they disagree. Only the labels
+differ — the topology and the hardware are the same throughout.
 
 **Phase 1**
 
@@ -221,52 +223,63 @@ ping here pins the source with `-S 192.168.0.100`.
 
 ## 4. Throughput matrix
 
-Measured in **phase 1**, so the node names below map to the phase-1 addresses:
-Bridge `.12`, FollowerA `.201`, FollowerB `.202`.
-
-`scripts/iperf_matrix_test.py`, UDP rate search over 1–80 Mbit/s with a 2 %
-loss threshold, then one TCP measurement. UDP loss always read from the
-receiving side.
+Measured in **phase 2**, on the addressing in section 2 and with the same
+firmware as everything else here. `scripts/iperf_matrix_test.py`, UDP rate
+search over 1-80 Mbit/s with a 2 % loss threshold, then one TCP measurement.
+UDP loss always read from the receiving side.
 
 | Direction | UDP max | TCP |
 |---|---|---|
-| PC → Bridge | 79.46 Mbit/s, 0.0 % | 19.79 Mbit/s |
-| Bridge → PC | 72.80 Mbit/s, 0.0 % | 11.70 Mbit/s |
-| PC → FollowerA | 7.96 Mbit/s, 0.0 % | 5.70 Mbit/s |
-| PC → FollowerB | 8.00 Mbit/s, 0.0 % | 5.56 Mbit/s |
+| PC → Bridge | 72.72 Mbit/s, 0.0 % | 18.85 Mbit/s |
+| Bridge → PC | 72.80 Mbit/s, 0.0 % | 11.50 Mbit/s |
+| PC → FollowerA | 2.00 Mbit/s, 0.0 % | 5.30 Mbit/s |
+| PC → FollowerB | 4.92 Mbit/s, 1.0 % | 5.62 Mbit/s |
 | Bridge → FollowerA | 9.42 Mbit/s, 0.0 % | 5.84 Mbit/s |
-| Bridge → FollowerB | 9.44 Mbit/s, 0.0 % | 5.85 Mbit/s |
-| FollowerA → PC | 9.44 Mbit/s, 0.0 % | 3.90 Mbit/s |
+| Bridge → FollowerB | 9.43 Mbit/s, 0.0 % | 5.85 Mbit/s |
+| FollowerA → PC | 9.46 Mbit/s, 0.0 % | 3.90 Mbit/s |
 | FollowerA → Bridge | 9.42 Mbit/s, 0.0 % | 5.84 Mbit/s |
-| FollowerA → FollowerB | 9.43 Mbit/s, 0.0 % | 5.85 Mbit/s |
+| FollowerA → FollowerB | 9.44 Mbit/s, 0.0 % | 5.85 Mbit/s |
 | FollowerB → PC | 9.44 Mbit/s, 0.0 % | 3.89 Mbit/s |
+| FollowerB → Bridge | 9.42 Mbit/s, 0.0 % | 5.83 Mbit/s |
 | FollowerB → FollowerA | 9.42 Mbit/s, 0.0 % | 5.83 Mbit/s |
-| FollowerB → Bridge | **FAIL** | **FAIL** |
 
-Eleven of twelve directions pass, with zero UDP loss throughout. Every path
-that crosses the T1S segment lands at 9.4 Mbit/s, the physical ceiling of
-10BASE-T1S minus PLCA overhead — identical whether the traffic involves the
-bridge or runs directly between two followers, and identical for the board
-without a 100BASE-TX PHY.
+**All twelve directions now produce a measurement.** Every path crossing the
+T1S segment lands at 9.42-9.46 Mbit/s with zero loss — the physical ceiling of
+10BASE-T1S minus PLCA overhead, and identical whether the traffic involves the
+bridge, runs directly between two followers, or terminates on the board that has
+no 100BASE-TX PHY at all. Bridge-originated TCP toward a follower stays at
+5.84/5.85 Mbit/s, so the `TC6_TX_ETH_MAX_SEGMENTS` fix still holds; without it
+this direction reads 0.00 Mbit/s.
 
-The PC → Follower direction tops out one step lower, at ~8 Mbit/s. The only
-hop unique to that path is the extra 100BASE-TX leg feeding into the bridge;
-not investigated further.
+### `FollowerB → Bridge` no longer fails
 
-`FollowerB → Bridge` is the genuine failure, and it is structural rather than a
-throughput limit: the script addresses the bridge at `192.168.0.12`, which
-COM23 believes is one of its own addresses — see [defect 1](#6-defects-found).
-Addressing the bridge at `.11` instead would make this direction measurable.
+The earlier run reported FAIL here because the script addressed the bridge at
+`192.168.0.12`, which COM23 holds as one of its own addresses
+([defect 1](#6-defects-found)). It now addresses a board's **eth0**, the T1S
+side, whenever the source is another board — which is both the correct thing to
+measure for a T1S peer and enough to sidestep the defect.
+`FollowerB → FollowerA` also came in clean, so the follow-on effect from
+defect 2 did not recur.
 
-`FollowerB → FollowerA` initially reported FAIL as well, but only as a
-**follow-on effect** — see defect 2. Re-run in isolation it delivers the
-9.42 Mbit/s in the table.
+### The one figure that does not reproduce
+
+`PC → Follower` measured 7.96 and 8.00 Mbit/s in phase 1, and 2.00 and
+4.92 Mbit/s here — while every other direction reproduces to within
+0.04 Mbit/s. Same firmware, same path, same script settings; the rate search
+uses coarse steps (1, 2, 5, 8, ...), so the two runs disagree by one to two
+steps rather than marginally.
+
+This is the only direction whose bottleneck is the bridge forwarding *from* the
+fast segment *into* the slow one, so it depends on buffer availability at that
+moment rather than on a sender that is itself the limit. That makes run-to-run
+variation plausible, but it is not established — treat the PC→follower figure
+as indicative and the T1S-limited figures as solid.
 
 ---
 
 ## 5. Sniffer capture validation
 
-Measured in **phase 1** as well.
+Measured in **phase 2**.
 `scripts/sniffer_capture_test.py --udp-rate 10 --duration 5`: `sniffer` enabled
 on COM8, real traffic driven **directly between COM10 and COM23**, tshark
 recording on the PC's NIC. With sniffer on, COM8's own T1S transmitter is
@@ -274,30 +287,59 @@ disabled — it is a passive tap and not a participant in this traffic.
 
 | Test | Verdict |
 |---|---|
-| UDP FollowerA → FollowerB | **COMPLETE** — every sent sequence id present |
-| UDP FollowerB → FollowerA | **COMPLETE** — 4024 datagrams captured, 4023 sent |
-| TCP FollowerA → FollowerB | **COMPLETE** — 99.9 % of expected bytes |
-| TCP FollowerB → FollowerA | **COMPLETE** — 100.2 % of expected bytes |
+| UDP FollowerA → FollowerB | **COMPLETE** — 4018 captured, 4017 sent |
+| UDP FollowerB → FollowerA | **COMPLETE** — 4023 captured, 4022 sent |
+| TCP FollowerA → FollowerB | **COMPLETE** — 3 639 496 bytes / 2499 segments, 99.6 % of expected |
+| TCP FollowerB → FollowerA | **COMPLETE** — 3 638 036 bytes / 2497 segments, 99.8 % of expected |
 
-The UDP runs asked for 10 Mbit/s and the link delivered 9.44 Mbit/s at 0 %
-loss, i.e. the mirror path was exercised at the segment's ceiling, not at a
-comfortable fraction of it.
+The UDP runs asked for 10 Mbit/s and the link delivered 9.31 Mbit/s at 0 % loss
+by the sender's own count, i.e. the mirror path was exercised at the segment's
+ceiling rather than at a comfortable fraction of it.
 
 Mirror counters on COM8 for the whole run:
 
 ```
-dbg: rx_hook=18081 passed_filter=18081 pool_empty=0 no_eth1=0 tx_submitted=18081
-dbg: ack_ok=18081 ack_fail=0 last_ack_res=0 max_len_submitted=1514 max_len_ok=1514
-dbg: truncated=13044 (frames cut to 1514 bytes before mirroring)
+dbg: rx_hook=18027 passed_filter=18027 pool_empty=0 no_eth1=0 tx_submitted=18027
+dbg: ack_ok=18027 ack_fail=0 last_ack_res=0 max_len_submitted=1514 max_len_ok=1514
+dbg: truncated=13022 (frames cut to 1514 bytes before mirroring)
 ```
 
-18081 frames seen, 18081 mirrored, 18081 confirmed sent by the GMAC. No buffer
-exhaustion, no missing destination interface, no failed transmit.
+18 027 frames seen, 18 027 mirrored, 18 027 confirmed sent by the GMAC. No
+buffer exhaustion, no missing destination interface, no failed transmit.
 
-13044 frames were cut to `MIRROR_SAFE_FRAME_LEN`, yet no datagram went missing
-and no captured frame was shorter than its own IP/UDP header claimed. Consistent
-with the truncation removing only trailing bytes past the IP payload rather than
-payload itself — plausible but not separately proven here.
+### What the truncation counter actually does — now measured, not assumed
+
+13 022 of those frames were clamped to `MIRROR_SAFE_FRAME_LEN`, and the previous
+version of this report could only call the clamp harmless as a plausible
+inference. Checked directly against the captures this time:
+
+```
+tcp_FollowerA_to_FollowerB.pcapng: lost_segment=0  ack_lost=0  retransmission=0
+tcp_FollowerB_to_FollowerA.pcapng: lost_segment=0  ack_lost=0  retransmission=0
+```
+
+Wireshark finds **no gap at all** in either TCP stream, and the frame lengths
+explain why. Data segments capture at 1514 bytes and pure ACKs at 64, with
+nothing in between; all 4018 captured UDP datagrams read
+`frame.len=1514  ip.len=1498  udp.length=1478`, without a single exception.
+
+Those numbers say the mirrored copies are, if anything, slightly **too long**
+rather than short: a minimum-size ACK is 60 bytes on the wire but captures as
+64, and a full-size frame is 1512 bytes on the wire but captures as 1514. The
+extra bytes are the 4-byte Ethernet FCS, which the LAN865x hands up and nothing
+strips; for a full-size frame the 1514 clamp happens to cut two of those four
+away again. Wireshark parses by the IP and UDP header lengths and ignores the
+remainder, which is why the captures are byte-exact for analysis. This also
+explains, from the opposite direction, the consistent "4 bytes over" reading
+recorded in [`session-log.md`](session-log.md) for small frames.
+
+So the clamp never removes payload. What it removes is FCS padding the capture
+had no use for.
+
+One caveat on this run: the destination's own iperf report failed to parse for
+both UDP directions (`destination report: NO RESULT`), so receive-side loss was
+not independently confirmed and completeness is measured against the sender's
+own sequence counter. The TCP directions did report from the destination.
 
 Turning sniffer off restored the transmitter with the readback confirmation the
 firmware now performs:
@@ -351,25 +393,41 @@ sniffer capture of the T1S segment shows no ARP request for `.12` ever being
 sent, while requests for `.201` from the same board are there.
 
 Impact: any board without its 100BASE-TX PHY can never reach the real bridge's
-eth1 address, so one of twelve throughput directions is structurally
-impossible. Workarounds, in order of preference: address the bridge by its
+eth1 address. Workarounds, in order of preference: address the bridge by its
 eth0 address `.11` from the T1S side, give the bridge's eth1 an address other
 than the compiled default, or change the default in `configuration.h`.
 
+*Status: present, not fixed.* The throughput matrix in section 4 takes the
+first workaround, which is why the direction is measurable there — the defect
+itself is untouched.
+
 **2. A hung iperf session cannot be cleared, and poisons the next test.**
-`FollowerB → Bridge` targets `.12`, which COM23 cannot reach, so the session
-waits forever on an ARP that never resolves — the failure mode
+`FollowerB → Bridge` used to target `.12`, which COM23 cannot reach, so the
+session waited forever on an ARP that never resolves — the failure mode
 `iperf_matrix_test.py` warns about in its own docstring. `iperfk` then answers
 `trying to stop iperf instance 0...` and never completes, and the following
 test aborts with `All instances busy. Retry later!`. Only a board reset clears
-it. That is why two directions showed FAIL when only one is genuinely broken.
+it. That is why two directions once showed FAIL when only one was genuinely
+broken.
 
-**3. `iperf_matrix_test.py` assumes only the bridge has two interfaces.**
-Its `bind_ip` is set for the `Bridge` source only, with the comment "only the
+*Status: no longer triggered, not fixed.* With defect 1 routed around, nothing
+in the matrix reaches an unresolvable address any more, and the phase-2 run
+completed all twelve directions without a single stuck session. The inability
+to kill a session that is already hung is untouched.
+
+**3. `iperf_matrix_test.py` assumed only the bridge has two interfaces.**
+Its `bind_ip` was set for the `Bridge` source only, with the comment "only the
 Bridge has more than one interface". After this rollout all three nodes have
-two, so follower sources are never pinned with `iperfi`. Not proven to have
-caused a failure here — after a reset, COM23 chose eth0 correctly on its own —
-but the assumption the script documents is no longer true of this bench.
+two, so follower sources were never pinned with `iperfi`.
+
+*Status: fixed.* Interface selection is no longer a special case for one node:
+each entry in `DEVICES` now carries its own `eth0`/`eth1` addresses plus a
+`toward_pc` field naming the interface that faces the PC — still `eth0` for a
+follower, which reaches the PC through the T1S segment rather than on its own
+eth1. Two helpers use it: `bind_addr_for()` pins the client's outgoing
+interface per destination, and `dest_addr_for()` makes board-to-board traffic
+address the destination's eth0. `sniffer_capture_test.py` imports both instead
+of reading `["ip"]` directly.
 
 ---
 
@@ -395,9 +453,9 @@ bridge firmware has no equivalent. Restoring it means reflashing
 ## 8. Verification status
 
 What was tested against which board state, so nobody has to infer it from the
-sections above. All measurements used the patched build
-`Sep  2 2026 21:53:50`; the throughput and capture figures come from the phase-1
-addressing, the ping matrix from phase 2.
+sections above. Everything here — the ping matrix, the throughput matrix and the
+sniffer validation — was measured on the patched build `Sep  2 2026 21:53:50`
+with the phase-2 addressing, on the bench as it now stands.
 
 | Board state | Ping | iperf | Sniffer capture |
 |---|---|---|---|
@@ -422,9 +480,13 @@ Explicitly **not** verified:
 - **`env_apply()` writes configuration into both interfaces.** Defect 1 shows
   that this path fails silently for a downed interface. Which other fields are
   affected the same way was not investigated.
-- **iperf and sniffer under the phase-2 addressing.** The numbers in sections 4
-  and 5 were taken with the phase-1 addresses. Nothing suggests the addressing
-  changes them, but they have not been re-measured on the bench as it stands.
 - **Whether a reply's egress interface explains the PC-side asymmetry.**
   Plausible, and consistent with `ping` defaulting to eth0, but the reply path
   cannot be pinned from the CLI.
+- **Why `PC → Follower` throughput does not reproduce** between the two runs
+  (section 4). Every other direction repeats to within 0.04 Mbit/s; this one
+  moved by one to two steps of the rate search.
+- **Receive-side loss for the two UDP sniffer directions.** The destination's
+  own report did not parse on this run, so completeness rests on the sender's
+  sequence counter. The capture analysis is independent of that and found no
+  gaps.

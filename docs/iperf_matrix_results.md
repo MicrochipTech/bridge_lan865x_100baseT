@@ -1,7 +1,14 @@
 # iperf Throughput Matrix — Results
 
 Full 12-direction `iperf` matrix from `scripts\iperf_matrix_test.py`, run on
-2026-09-01 against this bench's own bridge.
+2026-09-01 against this bench's own bridge — one bridge and two boards running a
+single-interface follower firmware.
+
+> A later run of the same matrix, on 2026-09-03, is reported in
+> [`three-board-rollout-report.md`](three-board-rollout-report.md) section 4. It
+> is not a replacement for this one: there, all three boards run the bridge
+> firmware and are two-homed, so the numbers are measured on a different setup.
+> The T1S-limited directions agree closely across both; `PC → Follower` does not.
 Raw, unabridged output — every rate step, every captured device report — is
 written to `docs\iperf_matrix_results.log` by the script itself, on whichever
 machine runs it. That log is not committed; the tables below are the summary.

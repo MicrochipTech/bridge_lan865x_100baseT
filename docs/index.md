@@ -76,14 +76,18 @@ per pair, with loss always read from the receiving side. Includes the
 0.00 Mbit/s until the driver was allowed more than one segment per packet.
 
 ### [`three-board-rollout-report.md`](three-board-rollout-report.md) — one image on three boards, measured
-*Written 2026-09-02.* The same firmware deployed to all three bench boards,
-including one populated with only the T1S MAC-PHY, with the configuration used
-and the numbers that came out: a six-address reachability check, the full
+*2026-09-02 and 2026-09-03.* The same firmware deployed to all three bench
+boards, including one populated with only the T1S MAC-PHY, with the
+configuration used and the numbers that came out: what a fully erased board
+seeds into its own EEPROM, a seven-address reachability matrix, the full
 twelve-direction iperf matrix, and a sniffer capture validated at the segment's
-10 Mbit/s ceiling with tshark. Ends with the three defects the run exposed —
-interface selection on a dual-homed node, an iperf session that cannot be
-killed once its ARP never resolves, and an assumption in the matrix script that
-this bench no longer satisfies.
+10 Mbit/s ceiling with tshark — checked for lost segments, not just for byte
+counts. Records three defects: a board with a missing PHY being stuck on the
+compiled default IP for that interface (present), an iperf session that cannot
+be killed once its ARP never resolves (no longer triggered), and an assumption
+in the matrix script that this bench no longer satisfies (fixed). Ends with an
+explicit verification-status table saying which board state is covered by which
+test, and what is not verified.
 
 ### [`session-log.md`](session-log.md) — chronological bring-up record
 *2406 lines, by far the largest document here.* Every step of the bring-up in
