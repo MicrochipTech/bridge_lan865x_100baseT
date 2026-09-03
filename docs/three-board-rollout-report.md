@@ -389,3 +389,42 @@ Two boards also lost a capability in the swap: they previously ran a PTP
 follower firmware that steers a wall clock from Sync/Follow_Up messages. The
 bridge firmware has no equivalent. Restoring it means reflashing
 `T1S_Follower.hex` and re-entering that board's `env`.
+
+---
+
+## 8. Verification status
+
+What was tested against which board state, so nobody has to infer it from the
+sections above. All measurements used the patched build
+`Sep  2 2026 21:53:50`; the throughput and capture figures come from the phase-1
+addressing, the ping matrix from phase 2.
+
+| Board state | Ping | iperf | Sniffer capture |
+|---|---|---|---|
+| Both PHYs fitted | yes | yes | yes |
+| **100BASE-TX PHY missing** | yes | yes, as an endpoint — 9.42 / 9.44 Mbit/s, 0 % loss | yes, as a traffic endpoint; the feature itself needs eth1 and cannot run *on* such a board |
+| **T1S MAC-PHY missing** | yes | not pursued | not pursued |
+
+The board without its 100BASE-TX PHY was not a bystander in the throughput and
+capture runs — it was `FollowerB`, one of the two endpoints, and the sniffer
+test's four verdicts were `COMPLETE` with it in the path. Regression on a
+healthy board is covered by the same runs, since the bridge carrying them had
+both PHYs.
+
+Coverage for the missing-T1S-PHY case stops at ping **by decision**, not by
+oversight. On such a board T1S throughput and the mirror path are structurally
+impossible — there is no eth0 to measure or to mirror from — and the remaining
+possibility, iperf over eth1 against the PC, was judged not worth the bench
+time.
+
+Explicitly **not** verified:
+
+- **`env_apply()` writes configuration into both interfaces.** Defect 1 shows
+  that this path fails silently for a downed interface. Which other fields are
+  affected the same way was not investigated.
+- **iperf and sniffer under the phase-2 addressing.** The numbers in sections 4
+  and 5 were taken with the phase-1 addresses. Nothing suggests the addressing
+  changes them, but they have not been re-measured on the bench as it stands.
+- **Whether a reply's egress interface explains the PC-side asymmetry.**
+  Plausible, and consistent with `ping` defaulting to eth0, but the reply path
+  cannot be pinned from the CLI.
