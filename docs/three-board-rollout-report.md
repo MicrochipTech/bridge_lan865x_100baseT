@@ -20,9 +20,33 @@ entire TCP/IP stack, taking the healthy T1S side down with it. That is fixed by
 `patches/tcpip_manager.patch` — see item 11 in
 [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md).
 
-Only the third board needs the patch. A board whose PHY is present but whose
-cable is unplugged was never affected: the PHY is detected, the interface comes
-up, and only the link stays down.
+A board whose PHY is present but whose cable is unplugged was never affected:
+the PHY is detected, the interface comes up, and only the link stays down.
+
+**The patch covers either PHY going missing, and both cases are measured.**
+Pulling the LAN8651 Click board off the bridge produces the mirror image of the
+100BASE-TX case — the SPI bus reads back all ones, because nothing is answering:
+
+```
+TCP/IP Stack: Initialization Started
+Invalid MACPHY, oui=0x3FFFFF, model=0x3FF
+TCP/IP Stack: Initialization Ended - success
+eth0 (10BASE-T1S) : NOT AVAILABLE
+eth1 (100BASE-TX) : up
+Bridging is DISABLED - it needs both interfaces.
+```
+
+The board then ran as a plain 100BASE-TX node: `PC → .12` 3 of 3, `COM8 → PC`
+4 of 4, console and Telnet unaffected. `.11`, the address of the interface that
+is gone, is unreachable, and LAN865x register access answers `result=-5` —
+that driver is torn down with its interface, the same limitation the
+100BASE-TX case shows in reverse. With the T1S PHY removed the other two boards
+also lose their only path to the PC, as expected.
+
+This matters because the two failures travel through different drivers —
+DRV_GMAC plus DRV_ETHPHY for eth1, DRV_LAN865X over SPI/TC6 for eth0 — and
+report through the same `MAC_Status` contract. The single assignment in the
+patch is enough for both.
 
 ---
 
@@ -153,8 +177,28 @@ runs in the same session gave identical results, but phase 1 with its different
 addressing *did* reach the equivalent of `.11`, so this is reproducible within a
 configuration and not across configurations. Not root-caused.
 
-`COM8 → PC` fails here and also failed three times in phase 1 before working on
-every later attempt. Recorded as intermittent; cause not established.
+### `COM8 → PC` is operator error, not a defect
+
+The bridge's `ping` needs to be told which interface to use. Left to itself it
+picks eth0, the T1S side, where the PC is not:
+
+```
+ping 192.168.0.100              Sent 4 requests, received 0 replies
+ping 192.168.0.100 i eth1       Sent 4 requests, received 4 replies
+ping 192.168.0.100 i eth0       Sent 4 requests, received 0 replies
+```
+
+So every `COM8 → PC` failure in this report — three in phase 1, one in the
+matrix above — is the missing `i eth1`. On a node with two interfaces in one
+subnet the interface argument is mandatory, exactly as `iperf` needs `iperfi`.
+
+The same default egress plausibly explains why each board answers the PC on
+only one address: a reply sourced from `.11` would be sent out eth0 as well.
+That connection is untested — the reply path cannot be pinned from the CLI.
+
+It does **not** explain `COM23 → .12`, which stays `Sent 0` even with
+`i eth0` given explicitly. That one is [defect 1](#6-defects-found) and has a
+different cause.
 
 ### A measurement trap worth recording
 
