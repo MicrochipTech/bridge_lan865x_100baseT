@@ -1,8 +1,8 @@
 # One Firmware on Three Boards — Rollout and Test Report
 
-**Date:** 2026-09-02 · **Firmware:** build `Sep  2 2026 21:53:50`, branch
-`survive-missing-phy` · **Bench:** three SAM E54 Curiosity Ultra boards, one
-T1S segment, one PC
+**Dates:** 2026-09-02 (phase 1) and 2026-09-03 (phase 2) · **Firmware:** build
+`Sep  2 2026 21:53:50`, branch `survive-missing-phy` · **Bench:** three SAM E54
+Curiosity Ultra boards, one T1S segment, one PC
 
 The same bridge firmware image was deployed to all three boards on the bench —
 including one that has no 100BASE-TX PHY at all — and the resulting setup was
@@ -28,11 +28,29 @@ up, and only the link stays down.
 
 ## 2. Configuration
 
+The bench was set up twice. Phase 1 kept the addresses the boards had carried
+as followers; phase 2 started from fully erased MCUs to see what the firmware
+seeds on its own, and re-addressed the boards into a tidier block. The
+throughput and capture measurements (sections 4 and 5) are from phase 1, the
+reachability matrix (section 3) from phase 2. Only the labels differ — the
+topology and the hardware are the same throughout.
+
+**Phase 1**
+
 | Board | Probe | eth0 (T1S) | eth1 (100BASE-TX) | PLCA id | 100BASE-TX hardware |
 |---|---|---|---|---|---|
 | COM8 | `ATML3264031800001049` | `192.168.0.11` | `192.168.0.12` | 7 | PHY + cable |
 | COM10 | `ATML3264031800001290` | `192.168.0.201` | `192.168.0.210` | **0** (coordinator) | PHY, no cable |
 | COM23 | `ATML3264031800001103` | `192.168.0.202` | `192.168.0.220` | 1 | **no PHY** |
+
+**Phase 2** — after a full chip erase of all three (`flash_same54.py --erase`,
+which wipes the emulated EEPROM as well):
+
+| Board | Role | eth0 (T1S) | eth1 (100BASE-TX) | PLCA id |
+|---|---|---|---|---|
+| COM8 | bridge | `192.168.0.11` | `192.168.0.12` | 5 (seeded default) |
+| COM10 | **A** | `192.168.0.21` | `192.168.0.22` | **0** (coordinator) |
+| COM23 | **B** | `192.168.0.31` | `192.168.0.32` | **1** |
 
 PC on `192.168.0.100`, wired to COM8's RJ45. PLCA node count 8 on all three,
 exactly one coordinator.
@@ -43,9 +61,34 @@ a freshly flashed board finds no matching EEPROM record and falls back to the
 compiled defaults — `192.168.0.11` and PLCA id 5 — so flashing all three first
 would put three identical nodes on the bus at once.
 
+### What a fully erased board writes into the EEPROM by itself
+
+Phase 2 confirmed on hardware what `env.c` promises in code: `ENV_Init()`
+formats the blank region and immediately persists a record, with no `saveenv`
+needed. Read back from COM8 on its first boot after the erase:
+
+| Field | eth0 | eth1 |
+|---|---|---|
+| IP | `192.168.0.11` | `192.168.0.12` |
+| Mask | `255.255.255.0` | `255.255.255.0` |
+| Gateway | `192.168.0.1` | **`0.0.0.0`** |
+| DNS | `192.168.0.1` | `192.168.0.1` |
+
+Plus PLCA id 5 / count 8, `mirror` and `sniffer` off, magic `TIBR`, version 5.
+The MAC does not come from `configuration.h` at all but from
+`SAME54_SERIAL_WORD0` — OUI `00:04:25` plus three serial bytes, eth1 being eth0
+with the last byte incremented. That is why three freshly erased boards do not
+collide on MAC addresses, only on everything else.
+
+The eth1 gateway becoming `0.0.0.0` rather than `192.168.0.1` is the visible
+effect of the known typo in `TCPIP_NETWORK_DEFAULT_GATEWAY_IDX1`
+(`"192.168.0..1"`, a double dot): the string fails to parse and the field keeps
+the zero it was initialised with. The typo is not cosmetic.
+
 ### Boot output
 
-COM8 and COM10 report both interfaces:
+Captured in phase 1, hence the PLCA id 7 — the message format is the same in
+both phases. COM8 and COM10 report both interfaces:
 
 ```
 TCP/IP Stack: Initialization Ended - success
@@ -71,44 +114,71 @@ Without the patch the third line reads
 
 ---
 
-## 3. Reachability
+## 3. Reachability — full ping matrix
 
-### From the PC (`192.168.0.100`)
+Measured in phase 2, four sources against all seven addresses. `Sent 0` means
+the board produced no packet at all; a plain cross means it transmitted and got
+nothing back.
 
-| Target | Result |
-|---|---|
-| `.11` COM8 eth0 | reachable |
-| `.12` COM8 eth1 | reachable |
-| `.201` COM10 eth0 | reachable |
-| `.210` COM10 eth1 | **reachable**, although no cable is plugged into it |
-| `.202` COM23 eth0 | reachable |
-| `.220` COM23 eth1 | **no reply** — the interface does not exist |
+| from ↓ / to → | `.100` PC | `.11` | `.12` | `.21` | `.22` | `.31` | `.32` |
+|---|---|---|---|---|---|---|---|
+| **PC** | — | no | **yes** | **yes** | no | **yes** | no |
+| **COM8** (bridge) | no | yes | yes | yes | yes | yes | no |
+| **COM10** (A) | yes | yes | yes | yes | `Sent 0` | yes | no |
+| **COM23** (B) | yes | yes | `Sent 0` | yes | yes | yes | no |
 
-Five of six. The one failure is exactly the interface with no hardware behind
-it. `.210` answering is not a fluke: COM10 bridges its own eth0 and eth1, so a
-packet arriving over T1S for its eth1 address is delivered locally.
+**Board to board is essentially complete: 19 of 21 combinations work**,
+including every path across the T1S segment and straight through both bridges.
 
-### Between boards
+### The two `Sent 0` cells are the interesting ones
 
-Every board reaches every other board's T1S address, and both followers reach
-the PC through COM8's bridge. One direction fails permanently:
+`COM23 → .12` produces no packet, while `COM23 → .32` does transmit (and gets no
+answer). That pair is the proof for [defect 1](#6-defects-found): COM23 holds
+`.12` as one of *its own* addresses — the compiled default its eth1 was given at
+initialisation and can never leave — whereas the `.32` it was configured with
+exists only in the `env` record and never reached the stack.
 
-| Direction | Result |
-|---|---|
-| `COM23 → 192.168.0.12` (COM8 eth1) | `Sent 0 requests` — while `COM23 → .11` and `COM10 → .12` both work |
+`COM10 → .22` behaves the same way for the same reason at one remove: `.22` is
+its own eth1 address, and that interface has a PHY but no cable, so there is no
+link to send on. Where the interface does have a link, pinging one's own address
+works — `COM8 → .12` answers 4 of 4. The rule is: a ping to a local address
+succeeds only if that interface is linked.
 
-`COM8 → 192.168.0.100` also failed three times in a row during the first pass
-and then worked on every later attempt, so it is recorded as intermittent, not
-as a defect. Cause not established.
+### From the PC, each board answers on one address only
 
-The `.12` failure has a measured root cause — see
-[defect 1](#6-defects-found). It is not a routing or interface-selection
-problem: COM23 does not send anything at all, which is why nothing appears in
-a capture.
+`.12` for COM8, `.21` for A, `.31` for B — in each case the interface the
+request arrives through. The counterparts `.11` and `.22` stay silent even
+though ARP resolves for them; the PC's ARP table holds the correct MACs. Two
+runs in the same session gave identical results, but phase 1 with its different
+addressing *did* reach the equivalent of `.11`, so this is reproducible within a
+configuration and not across configurations. Not root-caused.
+
+`COM8 → PC` fails here and also failed three times in phase 1 before working on
+every later attempt. Recorded as intermittent; cause not established.
+
+### A measurement trap worth recording
+
+Windows `ping.exe` counts an ICMP *Destination host unreachable* as a received
+packet, so `Received = 3` and `0% loss` can both appear for an address that is
+not reachable at all:
+
+```
+Pinging 192.168.0.32 from 192.168.0.100 with 32 bytes of data:
+Reply from 192.168.0.100: Destination host unreachable.
+Packets: Sent = 2, Received = 2, Lost = 0 (0% loss)
+```
+
+The first pass of this matrix was scored that way and reported `.32` as
+reachable. Only `Reply from <target>: bytes=` lines count. The PC also has a
+second adapter in the same `/24` (Wi-Fi on `192.168.0.78`), so every PC-side
+ping here pins the source with `-S 192.168.0.100`.
 
 ---
 
 ## 4. Throughput matrix
+
+Measured in **phase 1**, so the node names below map to the phase-1 addresses:
+Bridge `.12`, FollowerA `.201`, FollowerB `.202`.
 
 `scripts/iperf_matrix_test.py`, UDP rate search over 1–80 Mbit/s with a 2 %
 loss threshold, then one TCP measurement. UDP loss always read from the
@@ -152,6 +222,7 @@ Addressing the bridge at `.11` instead would make this direction measurable.
 
 ## 5. Sniffer capture validation
 
+Measured in **phase 1** as well.
 `scripts/sniffer_capture_test.py --udp-rate 10 --duration 5`: `sniffer` enabled
 on COM8, real traffic driven **directly between COM10 and COM23**, tshark
 recording on the PC's NIC. With sniffer on, COM8's own T1S transmitter is
@@ -219,6 +290,14 @@ an interface with no link, and refuses to put anything on the wire:
 ping 192.168.0.12
 Ping: done. Sent 0 requests, received 0 replies.
 ```
+
+Phase 2 supplies the clean counter-check, because there the board was
+configured for `.32` instead of `.220`: `COM23 → .12` still reports `Sent 0`,
+while `COM23 → .32` reports `Sent 4 requests, received 0 replies`. The address
+it was *told* to use leaves the board and finds nobody; the address it was
+*never* told to use is the one it defends as local. That is the compiled default
+`configuration.h` gives eth1, surviving both a full chip erase and every
+reconfiguration attempt.
 
 `Sent 0` is the signature, and it is not specific to this case: `COM10 → .210`,
 its own eth1 address on a link-less interface, answers exactly the same way,
