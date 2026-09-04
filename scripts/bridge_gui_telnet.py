@@ -108,7 +108,8 @@ ENV_MODEL_FILE = Path(__file__).parent.parent / "json" / "env_model.json"
 # does NOT come along -- it's derived from the datasheet (LAN8650-1-Data-Sheet-60001734.pdf,
 # chapter 11, 182 registers) and lives exclusively in that configuration file.
 # ip/telnet_user/telnet_password are the defaults for this board (192.168.0.12,
-# admin/password) - changeable to a different board at any time via "Update Connection".
+# admin/password) - changeable to a different board at any time by editing the fields
+# and connecting; connect_device() remembers whatever was last used to connect.
 DEFAULT_CONFIG = {
     "ip": "192.168.0.12",
     "telnet_user": "admin",
@@ -849,11 +850,16 @@ class BridgeGUITelnet:
         self.telnet_password_var = tk.StringVar(value=self.config.get("telnet_password", "password"))
         ttk.Entry(top_frame, textvariable=self.telnet_password_var, width=10, show="*").pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(top_frame, text="Update Connection", command=self.update_connection).pack(side=tk.LEFT, padx=2)
-
-        # Connect/Disconnect buttons
-        ttk.Button(top_frame, text="🟢 Connect", command=self.connect_device).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top_frame, text="🔴 Disconnect", command=self.disconnect_device).pack(side=tk.LEFT, padx=2)
+        # One toggle button instead of separate Connect/Disconnect buttons: the
+        # connection state (the "Online"/"Offline" indicator further right, see
+        # connection_frame below) sits at the far right of a toolbar that easily runs
+        # wider than the window, so on a narrow window it's scrolled out of view and
+        # there's no way to tell connected from not. A plain tk.Button (not ttk) so
+        # its background color can be set directly regardless of the sv-ttk theme.
+        self.connect_toggle_btn = tk.Button(top_frame, text="🔴 Connect", bg="#c0392b", fg="white",
+                                             activebackground="#c0392b", activeforeground="white",
+                                             command=self.toggle_connection)
+        self.connect_toggle_btn.pack(side=tk.LEFT, padx=2)
 
         # Register bulk actions. They live up here rather than at the bottom of the
         # register tab because they are what one reaches for while watching the
@@ -1578,19 +1584,6 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         text.insert(1.0, help_text)
         text.config(state=tk.DISABLED)
 
-    def update_connection(self):
-        """Update IP/user/password in config"""
-        host = self.ip_var.get().strip()
-        if not host:
-            messagebox.showwarning("Warning", "Please enter an IP address")
-            return
-
-        self.config["ip"] = host
-        self.config["telnet_user"] = self.telnet_user_var.get()
-        self.config["telnet_password"] = self.telnet_password_var.get()
-        self.save_config()
-        self.set_status(f"Connection set to {host}")
-
     def set_status(self, message: str, duration: int = 3000):
         """Update status label with message"""
         self.status_label.config(text=message, foreground="green")
@@ -1608,15 +1601,26 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         self.bridge_output.config(state=tk.DISABLED)
 
     def update_connection_indicator(self):
-        """Update the connection indicator circle and label"""
+        """Update the connection indicator circle/label, and the Connect/Disconnect toggle button."""
         if self.connected:
             self.connection_indicator.delete("all")
             self.connection_indicator.create_oval(2, 2, 13, 13, fill="green", outline="darkgreen")
             self.connection_label.config(text="Online", foreground="green")
+            self.connect_toggle_btn.config(text="🟢 Disconnect", bg="#27ae60",
+                                            activebackground="#27ae60")
         else:
             self.connection_indicator.delete("all")
             self.connection_indicator.create_oval(2, 2, 13, 13, fill="red", outline="darkred")
             self.connection_label.config(text="Offline", foreground="red")
+            self.connect_toggle_btn.config(text="🔴 Connect", bg="#c0392b",
+                                            activebackground="#c0392b")
+
+    def toggle_connection(self):
+        """The single Connect/Disconnect button: act on whichever is currently true."""
+        if self.port_link:
+            self.disconnect_device()
+        else:
+            self.connect_device()
 
     def connect_device(self):
         """Open the Telnet connection (shared by CLI + Terminal)"""
@@ -1631,6 +1635,14 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
         user = self.telnet_user_var.get()
         password = self.telnet_password_var.get()
+
+        # Remember these for next launch - used to be a separate "Update Connection"
+        # button, folded in here since connecting already implies "these are the
+        # settings to use".
+        self.config["ip"] = host
+        self.config["telnet_user"] = user
+        self.config["telnet_password"] = password
+        self.save_config()
 
         def worker():
             link = TelnetLink(host, self.result_queue, username=user, password=password)
@@ -2105,11 +2117,20 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
                 start = time.time()
                 chunks = []
+                # Set the moment the response looks done (own echo + a trailing "> " on
+                # its own line) but not yet trusted - see below for why it needs a
+                # settle window instead of returning immediately.
+                prompt_seen_at = None
+                PROMPT_SETTLE_S = 0.15
 
                 while time.time() - start < timeout_ms / 1000.0:
                     try:
                         port, kind, payload = self.cmd_response_q.get(timeout=0.01)
                     except queue.Empty:
+                        # Nothing new since the trailing prompt appeared - if that's
+                        # been true for the whole settle window, it really is done.
+                        if prompt_seen_at is not None and time.time() - prompt_seen_at >= PROMPT_SETTLE_S:
+                            return "".join(chunks)
                         continue
 
                     if kind != "data":
@@ -2117,25 +2138,57 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     chunks.append(payload.decode("latin-1", "ignore"))
                     text = "".join(chunks)
                     # Done once the marker is there AND the line is complete -- an
-                    # "OK:" without a line ending is only the beginning.
+                    # "OK:" without a line ending is only the beginning. Always takes
+                    # priority over the prompt-based check below, and is why
+                    # 'lan_read'/'lan_write' resolve almost instantly despite needing
+                    # the settle window (see below): their "OK:"/"ERROR" line lands
+                    # a few ms after the prompt, well inside PROMPT_SETTLE_S, so this
+                    # fires first on the very next chunk.
                     for marker in ("OK:", "ERROR"):
                         pos = text.find(marker)
                         if pos >= 0 and "\n" in text[pos:]:
                             return text
-                    # Also done once the CLI has re-printed its "> " prompt on its own
-                    # line - the definitive end-of-response marker, independent of what
-                    # the command actually prints. This replaces an earlier idle-based
-                    # cutoff (return once ~40ms passed with no new chunk) that was wrong
-                    # over Telnet: 'showenv' legitimately arrives in two TCP segments,
-                    # with the eth0/eth1/mac/plca/mirror/sniffer lines up to a full
-                    # second behind the identity line - the idle cutoff fired in that
-                    # gap and truncated the response to the identity line alone, which
-                    # then made every field in the env parser come back unmatched
-                    # (found stays 0) - the "Command failed" dialog on Read Environment
-                    # against 192.168.0.21 and 192.168.0.32, confirmed 2026-09-04.
+                    # The CLI re-printing its "> " prompt on its own line is the
+                    # definitive end-of-response marker for a command whose own output
+                    # never contains "OK:"/"ERROR" (namely 'showenv') - independent of
+                    # what the command actually prints, unlike the marker check above.
+                    # This replaces an earlier idle-based cutoff (return once ~40ms
+                    # passed with no new chunk) that was wrong over Telnet: 'showenv'
+                    # legitimately arrives in two TCP segments, with the eth0/eth1/mac/
+                    # plca/mirror/sniffer lines up to a full second behind the identity
+                    # line - the idle cutoff fired in that gap and truncated the
+                    # response to the identity line alone, which then made every field
+                    # in the env parser come back unmatched (found stays 0) - the
+                    # "Command failed" dialog on Read Environment against
+                    # 192.168.0.21/.32, confirmed 2026-09-04.
+                    #
+                    # 'cmd in text' guards against a DIFFERENT race this introduced: a
+                    # rapid back-to-back loop (bulk_read_registers, one lan_read per
+                    # register) can still have the PREVIOUS command's own trailing ">"
+                    # in flight when this command's cmd_pending goes up - that stray
+                    # byte alone would satisfy "last line is '>'" before this command's
+                    # own echo has even arrived. A genuine completion always contains
+                    # this command's own echo.
+                    #
+                    # And why this can't just return immediately, unlike the fixes
+                    # above: measured directly against the board (2026-09-04), this
+                    # firmware's console prints the fresh "> " prompt right after
+                    # echoing the command line - BEFORE dispatching to the command
+                    # handler - so for 'lan_read'/'lan_write' the prompt reliably
+                    # arrives a few ms BEFORE the real "LAN865X ... OK: ... Value=..."
+                    # line, not after. Trusting it immediately (as an earlier version of
+                    # this fix did) returned the bare echo+prompt with no value at all,
+                    # near-100% of the time in bulk_read_registers - far worse than the
+                    # original bug. The settle window lets the marker check above win
+                    # the race on the next chunk when there is one; only a command like
+                    # 'showenv', whose trailing prompt really is the last thing sent,
+                    # ever actually waits out PROMPT_SETTLE_S.
                     last_line = text.replace("\r", "").rstrip("\n").rsplit("\n", 1)[-1].strip()
-                    if last_line == ">":
-                        return text
+                    if last_line == ">" and cmd in text:
+                        if prompt_seen_at is None:
+                            prompt_seen_at = time.time()
+                    else:
+                        prompt_seen_at = None
 
                 return "".join(chunks)
             finally:
@@ -2391,11 +2444,25 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
             failed = []
             for n, addr in enumerate(addrs, 1):
-                output = self.send_command_via_link(f"lan_read {addr}")
-                value = self.cli.parse_register_read(output)
-                if not value:
-                    m = re.search(r'Value=(0x[0-9A-Fa-f]+)', output)
-                    value = m.group(1) if m else ""
+                # Up to 2 retries: back-to-back 'lan_read' can occasionally outrun the
+                # LAN865x SPI transaction ("ERROR: Previous LAN operation still in
+                # progress" - a real, transient busy state, not a bug), or lose a rare
+                # race against send_command_via_link()'s prompt-settle window. Neither
+                # reproduces on a fresh attempt a few ms later, so retrying is cheap and
+                # far better than either slowing every read down or reporting a false
+                # "no response" - confirmed 2026-09-04 (repeated bulk reads against the
+                # same board show a different 0-4 addresses failing each time, not a
+                # consistent set, which is what a real per-register issue would look
+                # like instead).
+                value = ""
+                for attempt in range(3):
+                    output = self.send_command_via_link(f"lan_read {addr}")
+                    value = self.cli.parse_register_read(output)
+                    if not value:
+                        m = re.search(r'Value=(0x[0-9A-Fa-f]+)', output)
+                        value = m.group(1) if m else ""
+                    if value:
+                        break
 
                 if value:
                     self.result_queue.put(("register_read", addr, True, value))
