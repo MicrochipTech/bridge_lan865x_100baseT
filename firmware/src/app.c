@@ -40,6 +40,7 @@
 #include "config/default/library/tcpip/src/tcpip_packet.h"
 #include "env.h"
 #include "lan865x_diag.h"
+#include "lan867x_diag.h"
 #include "port_mirror.h"
 #include "noip_test.h"
 #include "testserver.h"
@@ -793,6 +794,7 @@ void APP_Initialize ( void )
     Command_Init();
     LEDS_Initialize();
     LAN865X_DIAG_Initialize();
+    LAN867X_DIAG_Initialize();
     NOIP_Initialize();
     TESTSERVER_Initialize();
     BOOTLOAD_Initialize();
@@ -892,7 +894,7 @@ static bool banner_miim_read_start(uint16_t reg)
         }
     }
     s_banner_miim_op = DRV_MIIM_Read(s_banner_miim, reg,
-                                     (uint16_t)DRV_LAN8742A_PHY_ADDRESS,
+                                     (uint16_t)DRV_LAN867x_PHY_ADDRESS,
                                      DRV_MIIM_OPERATION_FLAG_NONE, &res);
     return ((s_banner_miim_op != NULL) && (res >= DRV_MIIM_RES_OK));
 }
@@ -933,28 +935,21 @@ static void banner_print(void)
                           name, (unsigned)rev, (unsigned int)s_banner_devid);
     }
 
-    /* eth1 - external PHY, clause 22 PHY ID across registers 2 and 3 */
+    /* eth1 - LAN867x (10BASE-T1S), clause-22 PHY ID across registers 2 and 3.
+       EXPERIMENTAL branch: eth1 was LAN8742A/LAN8740A (100BASE-TX) before this
+       swap - the OUI/model decode below is LAN867x's own layout
+       (drv_extphy_lan867x.h: PHY_PHY_ID2_REV/PHY_PHY_ID2_MODEL/PHY_PHY_ID2_OUI),
+       not the LAN8742A one this comment used to describe. */
     if (!s_banner_eth1_up) {
-        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : NOT AVAILABLE\n\r");
+        SYS_CONSOLE_PRINT("eth1 (10BASE-T1S) : NOT AVAILABLE\n\r");
     } else if (!s_banner_eth1_ok) {
-        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : up    (PHY ID could not be read)\n\r");
+        SYS_CONSOLE_PRINT("eth1 (10BASE-T1S) : up    (PHY ID could not be read)\n\r");
     } else {
-        /* OUI is 22 bits: all of PHYID1, then PHYID2's top 6 */
-        uint32_t oui   = ((uint32_t)s_banner_phyid1 << 6)
-                       | (uint32_t)((s_banner_phyid2 & BANNER_PHYID2_OUI_LSB) >> 10);
         uint32_t model = (uint32_t)((s_banner_phyid2 & BANNER_PHYID2_MODEL) >> 4);
         uint32_t rev   = (uint32_t) (s_banner_phyid2 & BANNER_PHYID2_REV);
-        /* Model 0x11 is what the AC320004-3 daughter board fitted on this bench
-           reports - see README.md, where that pairing was confirmed against a
-           known-good LAN8740A image. Anything else prints the number only,
-           rather than guessing a name; the raw registers are always shown so a
-           wrong label could not hide the real value. Note MCC selects the
-           LAN8742A driver object, which drives either part for this purpose. */
-        const char *part = (oui != 0x0001F0u) ? ""
-                         : (model == 0x11u)   ? "LAN8740A " : "";
-        SYS_CONSOLE_PRINT("eth1 (100BASE-TX) : up    %s %smodel 0x%02X rev %u  (OUI 0x%06X, PHYID %04X:%04X)\n\r",
-                          (oui == 0x0001F0u) ? "Microchip" : "vendor", part,
-                          (unsigned)model, (unsigned)rev, (unsigned int)oui,
+        const char *name = (s_banner_phyid1 == 0x0007u) ? "LAN867x " : "";
+        SYS_CONSOLE_PRINT("eth1 (10BASE-T1S) : up    %smodel 0x%02X rev %u  (PHYID %04X:%04X)\n\r",
+                          name, (unsigned)model, (unsigned)rev,
                           (unsigned)s_banner_phyid1, (unsigned)s_banner_phyid2);
     }
 
@@ -1125,6 +1120,9 @@ void APP_Tasks ( void )
 
             /* Register access / test modes / PLCA - see lan865x_diag.c */
             LAN865X_DIAG_Tasks();
+
+            /* eth1 (LAN867x) MDIO register access - see lan867x_diag.c */
+            LAN867X_DIAG_Tasks();
 
             /* Boot-time chip identification. Runs after LAN865X_DIAG_Tasks() so
              * a register read that just completed is visible in the same pass,

@@ -80,11 +80,12 @@
 #include "net_pres/pres/net_pres_encryptionproviderapi.h"
 #include "net_pres/pres/net_pres_transportapi.h"
 #include "net_pres/pres/net_pres_socketapi.h"
+#include "net_pres/pres/net_pres_enc_glue.h"
 #include "system/console/sys_console.h"
 #include "system/console/src/sys_console_uart_definitions.h"
 #include "library/emulated_eeprom/emulated_eeprom.h"
 #include "driver/ethphy/drv_ethphy.h"
-#include "driver/ethphy/drv_extphy_lan8742a.h"
+#include "driver/ethphy/src/dynamic/drv_extphy_lan867x.h"
 #include "app.h"
 
 

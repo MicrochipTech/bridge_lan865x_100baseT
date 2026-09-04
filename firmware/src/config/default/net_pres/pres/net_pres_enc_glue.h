@@ -42,6 +42,14 @@ Microchip or any third party.
 #ifdef __CPLUSPLUS
 extern "C" {
 #endif
+
+/* wolfSSL-backed stream-server encryption provider (branch
+   t1s-t1s-bridge-lan8670's Telnet/bootload TLS experiment - see
+   net_pres_enc_glue.c). Wire into initialization.c's
+   netPresCfgs[...].pProvObject_ss to make NET_PRES stream-server sockets
+   capable of TLS. */
+extern const Net_ProvObject NET_PRES_EncProviderObject_wolfSSL_Stream;
+
 #ifdef __CPLUSPLUS
 }
 #endif

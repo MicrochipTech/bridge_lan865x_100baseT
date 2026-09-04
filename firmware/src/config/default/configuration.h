@@ -164,7 +164,10 @@ extern "C" {
 #define DRV_MIIM_DRIVER_INDEX_0                 0
 #define DRV_MIIM_INSTANCES_NUMBER           1
 #define DRV_MIIM_INSTANCE_OPERATIONS        4
-#define DRV_MIIM_INSTANCE_CLIENTS           2
+/* 3, not the MCC-generated 2: the ETHPHY driver's own client, app.c's boot-banner
+   client, and lan867x_diag.c's eth1_read/eth1_write client all share this MIIM
+   instance. */
+#define DRV_MIIM_INSTANCE_CLIENTS           3
 #define DRV_MIIM_CLIENT_OP_PROTECTION   false
 #define DRV_MIIM_COMMANDS   false
 #define DRV_MIIM_DRIVER_OBJECT              DRV_MIIM_OBJECT_BASE_Default            
@@ -450,12 +453,8 @@ extern "C" {
 #define TCPIP_GMAC_SCREEN2_COUNT_QUE        0  
 
 #define TCPIP_GMAC_ETH_OPEN_FLAGS                   \
-                                                        TCPIP_ETH_OPEN_AUTO |\
-                                                        TCPIP_ETH_OPEN_FDUPLEX |\
                                                         TCPIP_ETH_OPEN_HDUPLEX |\
-                                                        TCPIP_ETH_OPEN_100 |\
                                                         TCPIP_ETH_OPEN_10 |\
-                                                        TCPIP_ETH_OPEN_MDIX_AUTO |\
                                                             TCPIP_ETH_OPEN_RMII |\
                                                         0
 
@@ -502,7 +501,17 @@ extern "C" {
 #define NO_PWDBASED
 #define HAVE_MCAPI
 #define WOLF_CRYPTO_CB  // provide call-back support
-#define WOLFCRYPT_ONLY
+/* WOLFCRYPT_ONLY removed for the eth1/Telnet+bootload TLS experiment (branch
+   t1s-t1s-bridge-lan8670): pulls in the actual TLS protocol layer
+   (ssl.c/internal.c/tls.c, vendored from the same net_10base_t1s-pinned
+   wolfssl v5.4.0 package under third_party/wolfssl/wolfssl/src/), not just
+   the crypto primitives that were already linked in unused. Server-only
+   (NO_WOLFSSL_CLIENT) and TLS 1.2-only (no tls13.c vendored, NO_OLD_TLS below
+   forces >=1.2) to keep this to the single shared TLS session slot this board
+   can actually afford - see the RAM/heap discussion in the session log. */
+#define NO_WOLFSSL_CLIENT
+#define NO_OLD_TLS
+#define NO_SESSION_CACHE        /* one session at a time - resumption caching buys nothing here */
 // ---------- FUNCTIONAL CONFIGURATION START ----------
 #define WOLFSSL_AES_SMALL_TABLES
 #define NO_MD4
@@ -574,16 +583,22 @@ extern "C" {
 #define TCPIP_STACK_MAC_BRIDGE_DISABLE_GLUE_PORTS false
 
 
-#define DRV_LAN8742A_PHY_CONFIG_FLAGS       ( 0 \
+#define DRV_LAN867x_PHY_CONFIG_FLAGS       ( 0 \
                                                     | DRV_ETHPHY_CFG_RMII \
                                                     )
-                                                    
-#define DRV_LAN8742A_PHY_LINK_INIT_DELAY            500
-#define DRV_LAN8742A_PHY_ADDRESS                    0
-#define DRV_LAN8742A_PHY_PERIPHERAL_ID              GMAC_BASE_ADDRESS
-#define DRV_ETHPHY_LAN8742A_NEG_INIT_TMO            1
-#define DRV_ETHPHY_LAN8742A_NEG_DONE_TMO            2000
-#define DRV_ETHPHY_LAN8742A_RESET_CLR_TMO           500
+
+#define DRV_LAN867x_PHY_LINK_INIT_DELAY            500
+#define DRV_LAN867x_PHY_ADDRESS                    0
+#define DRV_LAN867x_PHY_PERIPHERAL_ID              GMAC_BASE_ADDRESS
+#define DRV_ETHPHY_LAN867x_NEG_INIT_TMO            0
+#define DRV_ETHPHY_LAN867x_NEG_DONE_TMO            0
+#define DRV_ETHPHY_LAN867x_RESET_CLR_TMO           500
+
+#define DRV_ETHPHY_PLCA_ENABLED
+#define DRV_ETHPHY_PLCA_LOCAL_NODE_ID             0
+#define DRV_ETHPHY_PLCA_NODE_COUNT                8
+#define DRV_ETHPHY_PLCA_MAX_BURST_COUNT           0
+#define DRV_ETHPHY_PLCA_BURST_TIMER               128
 
 
 

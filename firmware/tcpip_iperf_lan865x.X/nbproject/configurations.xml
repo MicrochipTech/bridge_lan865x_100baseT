@@ -14,12 +14,11 @@
               <logicalFolder name="src" displayName="src" projectFiles="true">
                 <logicalFolder name="dynamic" displayName="dynamic" projectFiles="true">
                   <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_regs.h</itemPath>
-                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan8742a_priv.h</itemPath>
+                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan867x.h</itemPath>
                 </logicalFolder>
                 <itemPath>../src/config/default/driver/ethphy/src/drv_ethphy_local.h</itemPath>
               </logicalFolder>
               <itemPath>../src/config/default/driver/ethphy/drv_ethphy.h</itemPath>
-              <itemPath>../src/config/default/driver/ethphy/drv_extphy_lan8742a.h</itemPath>
             </logicalFolder>
             <logicalFolder name="gmac" displayName="gmac" projectFiles="true">
               <logicalFolder name="src" displayName="src" projectFiles="true">
@@ -714,7 +713,7 @@
               <logicalFolder name="src" displayName="src" projectFiles="true">
                 <logicalFolder name="dynamic" displayName="dynamic" projectFiles="true">
                   <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_ethphy.c</itemPath>
-                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan8742a.c</itemPath>
+                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan867x.c</itemPath>
                 </logicalFolder>
               </logicalFolder>
             </logicalFolder>
@@ -960,11 +959,17 @@
         <itemPath>../src/third_party/wolfssl/wolfssl/wolfcrypt/src/sha.c</itemPath>
         <itemPath>../src/third_party/wolfssl/wolfssl/wolfcrypt/src/sha256.c</itemPath>
         <itemPath>../src/third_party/wolfssl/wolfssl/wolfcrypt/src/sha512.c</itemPath>
+        <itemPath>../src/third_party/wolfssl/wolfssl/src/ssl.c</itemPath>
+        <itemPath>../src/third_party/wolfssl/wolfssl/src/internal.c</itemPath>
+        <itemPath>../src/third_party/wolfssl/wolfssl/src/tls.c</itemPath>
+        <itemPath>../src/third_party/wolfssl/wolfssl/src/keys.c</itemPath>
+        <itemPath>../src/third_party/wolfssl/wolfssl/src/wolfio.c</itemPath>
       </logicalFolder>
       <itemPath>../src/app.c</itemPath>
       <itemPath>../src/main.c</itemPath>
       <itemPath>../src/env.c</itemPath>
       <itemPath>../src/lan865x_diag.c</itemPath>
+      <itemPath>../src/lan867x_diag.c</itemPath>
       <itemPath>../src/port_mirror.c</itemPath>
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>
