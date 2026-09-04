@@ -44,11 +44,12 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 11 | `library\tcpip\src\tcpip_manager.c` — record the power state of an interface that failed to initialize | A MAC/PHY that is not physically fitted aborts the **entire** stack, taking the healthy interface, the MAC bridge, Telnet and LAN865x register access down with it | High — availability, unfitted-hardware only |
 | 12 | `tasks.c` — `CPULOAD_Enter()`/`CPULOAD_Exit()` hooks around each `SYS_Tasks()` call | Loses the `cpuload` command's per-task cycle profiling; nothing else changes | Low — diagnostic feature only |
 | 13 | `interrupts.c` — vector table repointed at `cpuload.c`'s `CPULOAD_ISR_*()` wrappers | Loses the `cpuload` command's per-interrupt cycle profiling; nothing else changes | Low — diagnostic feature only |
+| 14 | `library\tcpip\src\tcpip_manager.c` — `TCPIPStackPacketTx()` doesn't assert on a transient "can't send right now" result | A large console `dump`/other bulk output over Telnet floods the serial console with `TCPIP Stack Assert` and wedges the round-robin loop under it, on a T1S node whose own TX queue is momentarily full | High — availability, heavy-Telnet-output paths |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
 Recommended re-apply order after any `Generate Code` run: **1 first** (nothing else
 matters if the board can't boot), then rebuild/flash/confirm it boots at all, then
-**2–5, 7, 9–13** in any order, rebuild/flash/retest once more. **6** will simply fail
+**2–5, 7, 9–14** in any order, rebuild/flash/retest once more. **6** will simply fail
 to compile if missed, so the build itself catches it — no separate verification
 needed.
 
@@ -799,6 +800,88 @@ much that could be; they don't get netted against the loop-task ones.
 **If lost:** `cpuload stats`/`cpuload live` show all 6 interrupt rows as "no
 samples yet" forever; the loop-task rows and everything else are unaffected.
 No build failure, no runtime regression — purely a diagnostic feature.
+
+---
+
+## 14. `library\tcpip\src\tcpip_manager.c` — `TCPIPStackPacketTx()` doesn't
+assert on a transient "can't send right now" result
+
+**Why:** found 2026-09-04 while investigating a Follower board (`192.168.0.21`,
+reached over Telnet through the Bridge's T1S forwarding) that flooded its
+serial console with `TCPIP Stack Assert: in file: tcpip_manager.c, func:
+TCPIPStackPacketTx, line: 5365,` — hundreds of lines, continuously — while
+running a large `dump 0xfc000 16000` (~79 KB of console output), and stopped
+responding to new commands while it lasted.
+
+Two wrong turns before the real cause, both ruled out with direct evidence
+rather than assumption:
+
+- First suspected the MAC bridge blindly forwarding every eth0 frame out
+  eth1 too, on a board without a populated 100BASE-TX PHY (see item 11).
+  Disproved by `netinfo`: eth1 already reports `Interface is down` on this
+  board — item 11's existing mechanism had *already* disabled it at boot, so
+  `F_MAC_Bridge_ForwardPacket()`'s own pre-existing `TCPIP_STACK_NetworkIsUp()`
+  check was already false for eth1 the whole time. The bridge never touched
+  it.
+- Watching the Follower's own serial console directly (its EDBG COM port,
+  independent of the Telnet session under test) while repeating the same
+  `dump` confirmed the assert tracks eth0/T1S traffic volume exactly (zero
+  during 15s idle, hundreds during the dump) — real, but from a different
+  source than assumed.
+
+Root cause, found by reading the actual `MAC_PacketTx()` call chain instead
+of guessing further: `DRV_LAN865X_PacketTx()` (`drv_lan865x_api.c`) returns
+`TCPIP_MAC_RES_QUEUE_TX_FULL` (`tcpip_mac.h`, `= -12`) when its own TC6/SPI
+TX segment buffer is momentarily full — expected, self-resolving backpressure
+when a large console reply is pushed out over T1S (a shared, 10 Mbps
+half-duplex, PLCA-arbitrated bus) faster than it can drain, not a bug. Every
+caller of `TCPIPStackPacketTx()` (the bridge, `arp.c`, `ipv4.c`) already
+handles a negative return by dropping that one packet and moving on — none of
+them depend on the assert. The assert's own comment
+(`// stack should always use well formatted packets!`) states its actual
+intent: catch a malformed packet, not transient capacity backpressure. It was
+just checking `res >= 0` unconditionally, so a legitimate "full" result got
+treated the same as a real corruption bug.
+
+**Patch:** narrow the assert to genuine errors, immediately after the
+`MAC_PacketTx()` call:
+
+```c
+res = pNetIf->pMacObj->MAC_PacketTx(pNetIf->hIfMac, ptrPacket);
+bool resIsTransientBusy = (res == TCPIP_MAC_RES_QUEUE_TX_FULL) ||
+                           (res == TCPIP_MAC_RES_IS_BUSY) ||
+                           (res == TCPIP_MAC_RES_DCPT_ERR) ||
+                           (res == TCPIP_MAC_RES_NOT_READY_ERR);
+// stack should always use well formatted packets!
+TCPIPStack_Assert(((int32_t)res >= 0) || resIsTransientBusy, __FILE__, __func__, __LINE__);
+```
+
+The other three codes are the same "not right now, not a bug" family as
+`QUEUE_TX_FULL` (not enough TX descriptors, MAC momentarily busy, MAC not
+ready) — `NOT_READY_ERR` in particular is already returned, unasserted, by
+this same function's own `else` branch two lines below when `hIfMac` is 0, so
+excluding it here is consistent with the function's own existing behavior,
+not a new exception. `res` itself is returned unchanged either way — this
+only silences the diagnostic print, it does not change what any caller sees
+or does.
+
+**No MCC field exists for this** — it's stack behaviour, not a configuration
+value.
+
+**Verified on hardware (2026-09-04)**, same Follower board, same `dump
+0xfc000 16000` repeated 4x while watching its serial console directly: zero
+`TCPIP Stack Assert` lines (down from hundreds), all 4 Telnet reads completed
+correctly, and noticeably *faster* than before (5.6–7.6s vs 8–11s) since the
+console is no longer busy printing the diagnostic. Flashed to all three
+boards in this test setup.
+
+**If lost:** a large Telnet reply (`dump`, `netinfo`, a big `showenv`, ...)
+on a T1S node under load spams `TCPIP Stack Assert` on its serial console and
+the round-robin loop visibly slows down under the repeated
+`SYS_CONSOLE_PRINT()` calls while it lasts — the reply itself still arrives
+correctly (this was never a correctness bug, only a diagnostic
+false-positive), so it is easy to dismiss as harmless log noise until it is
+timed against a fresh board and found to be measurably slower.
 
 ---
 

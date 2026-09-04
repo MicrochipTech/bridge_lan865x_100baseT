@@ -2458,4 +2458,70 @@ completed step — do not wait until the end of the session.
 
 ---
 
+## 2026-09-04
+
+### `TCPIP Stack Assert` flood + console wedge on a Follower under a large `dump`
+
+- User reported: a large `dump 0xfc000 16000` (~79 KB of console output) over
+  Telnet to a Follower board (`192.168.0.21`, reached through the Bridge's T1S
+  forwarding) produced a continuous flood of `TCPIP Stack Assert: in file:
+  tcpip_manager.c, func: TCPIPStackPacketTx, line: 5365,` and the CLI stopped
+  accepting new commands. User's own hypothesis going in: the dump flooded the
+  stack with data until the heap ran out.
+- **First wrong turn:** suspected the MAC bridge (`tcpip_mac_bridge.c`)
+  blindly forwarding every eth0 frame out eth1 too, since every board in this
+  test setup runs the same bridge firmware and eth1 has no cable on a
+  Follower. Patched `F_MAC_Bridge_ForwardPacket()` to also require
+  `TCPIP_STACK_NetworkIsLinked()`, not just `NetworkIsUp()`, before
+  forwarding. Built, flashed, re-tested with the same serial-console-watching
+  method (open the Follower's own EDBG COM port directly, independent of the
+  Telnet session under test, so the assert - which prints via
+  `SYS_CONSOLE_PRINT`, i.e. the serial console, not Telnet - is actually
+  visible) - **asserts continued, denser than before.**
+- User pushed back, correctly: not convinced eth1/PHY-absence was the actual
+  cause, and pointed out the board in question has no 100BASE-TX PHY
+  populated at all (not just no cable) - frames should already be dropped
+  much lower, "im GMAC treiber oder kurz davor" (in the GMAC driver or just
+  before it). Also raised a separate, valid point: a board without two real
+  PHYs shouldn't run the bridge at all.
+- Checked `netinfo` on the live board: `eth1 (100BASE-TX): Interface is
+  down` - confirmed the *existing* item 11 hand-patch
+  (`mcc-generated-code-patches.md`) had *already* disabled eth1 at boot for
+  exactly this hardware population, meaning `F_MAC_Bridge_ForwardPacket()`'s
+  own pre-existing `TCPIP_STACK_NetworkIsUp()` check was already false for
+  eth1 the whole time - the bridge fix was chasing a path that was never
+  actually being taken. Reverted it (clean revert, `git diff` empty).
+- Traced the actual call chain instead of continuing to guess at the layer:
+  `TCPIPStackPacketTx()` (`tcpip_manager.c:5350`) calls
+  `pNetIf->pMacObj->MAC_PacketTx()`, which for eth0 is
+  `DRV_LAN865X_PacketTx()` (`drv_lan865x_api.c:692`). Found the real source
+  at lines 722-724: when the LAN865x's own TC6/SPI TX segment buffer is
+  momentarily full, it returns `TCPIP_MAC_RES_QUEUE_TX_FULL`
+  (`tcpip_mac.h`, `= -12`) - a legitimate, self-resolving "busy" result, not
+  a malformed packet. `TCPIPStackPacketTx()`'s assert
+  (`TCPIPStack_Assert(res >= 0, ...)`) was treating that the same as a
+  genuine stack bug; its own comment (`// stack should always use well
+  formatted packets!`) says what it was actually meant to catch.
+- **Fix:** narrowed the assert to exclude `QUEUE_TX_FULL` and the same
+  "not right now" family (`IS_BUSY`, `DCPT_ERR`, `NOT_READY_ERR` - the last
+  of which this same function already returns unasserted from its own
+  `else` branch when `hIfMac` is 0, so excluding it here matches existing
+  behavior rather than adding a new exception). `res` itself is unchanged,
+  so no caller's error handling changes - only the diagnostic print is
+  silenced for these four results. Full write-up, patch and verification:
+  `mcc-generated-code-patches.md` item 14, `patches/tcpip_manager.patch`
+  (baseline `50ec799`).
+- **Verified:** same `dump 0xfc000 16000` repeated 4x on the same board while
+  watching its serial console directly - zero asserts (down from hundreds),
+  all 4 Telnet reads completed correctly, and 5.6-7.6s instead of 8-11s
+  (no longer slowed by the console being busy printing the diagnostic).
+  Flashed to all three boards in this test setup.
+- The user's "a board without two real PHYs shouldn't run the bridge at all"
+  point is separately valid and not addressed by this fix (this assert was
+  never actually caused by the bridge or by eth1 in the first place, per the
+  `netinfo` check above) - left as a possible follow-up, not implemented
+  this session.
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->

@@ -1,5 +1,5 @@
 diff --git a/firmware/src/config/default/library/tcpip/src/tcpip_manager.c b/firmware/src/config/default/library/tcpip/src/tcpip_manager.c
-index b17da91..55db9fb 100644
+index b17da91..37ef9f8 100644
 --- a/firmware/src/config/default/library/tcpip/src/tcpip_manager.c
 +++ b/firmware/src/config/default/library/tcpip/src/tcpip_manager.c
 @@ -2024,6 +2024,22 @@ static bool F_TCPIPStackIsRunState(void)
@@ -25,3 +25,30 @@ index b17da91..55db9fb 100644
                  }
                  else if(macStat == SYS_STATUS_READY)
                  {   // get the MAC address and MAC processing flags
+@@ -5345,8 +5361,25 @@ TCPIP_MAC_RES TCPIPStackPacketTx(const TCPIP_NET_IF* pNetIf, TCPIP_MAC_PACKET *
+ #endif  // (M_TCPIP_STACK_VLAN_INTERFACE_SUPPORT != 0) 
+ 
+         res = pNetIf->pMacObj->MAC_PacketTx(pNetIf->hIfMac, ptrPacket);
++        // HAND-PATCH (CLAUDE.md section 3): don't assert on a result that just means
++        // "can't send this one right now", only on one that indicates an actual stack
++        // bug (matching this assert's own original comment below - malformed packets,
++        // not transient backpressure). Confirmed 2026-09-04 (see docs/session-log.md):
++        // a large console 'dump' over Telnet pushes eth0/T1S TX faster than the
++        // LAN865x's own TC6/SPI segment buffer can drain on the shared,
++        // PLCA-arbitrated bus, so DRV_LAN865X_PacketTx() (drv_lan865x_api.c) legitimately
++        // returns TCPIP_MAC_RES_QUEUE_TX_FULL - this assert fired hundreds of times
++        // during the dump and zero at idle, confirming it was traffic-driven
++        // backpressure, not a corrupted packet. IS_BUSY/DCPT_ERR/NOT_READY_ERR are the
++        // same "not right now" family (NOT_READY_ERR is in fact already returned,
++        // unasserted, by this very function's own 'else' branch below when hIfMac is
++        // 0) - none of the four indicate a malformed packet or a real stack defect.
++        bool resIsTransientBusy = (res == TCPIP_MAC_RES_QUEUE_TX_FULL) ||
++                                   (res == TCPIP_MAC_RES_IS_BUSY) ||
++                                   (res == TCPIP_MAC_RES_DCPT_ERR) ||
++                                   (res == TCPIP_MAC_RES_NOT_READY_ERR);
+         // stack should always use well formatted packets!
+-        TCPIPStack_Assert((int32_t)res >= 0, __FILE__, __func__, __LINE__);
++        TCPIPStack_Assert(((int32_t)res >= 0) || resIsTransientBusy, __FILE__, __func__, __LINE__);
+     }
+     else
+     {
