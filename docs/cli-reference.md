@@ -17,6 +17,7 @@ a running board, not written by hand.
 - [`span` — port mirror and sniffer](#span--port-mirror-and-sniffer)
 - [`noip` — raw Ethernet frame test](#noip--raw-ethernet-frame-test)
 - [`testserver` — TCP echo server](#testserver--tcp-echo-server)
+- [`bootload` — firmware update into the inactive flash bank](#bootload--firmware-update-into-the-inactive-flash-bank)
 - [`iperf` — throughput tester](#iperf--throughput-tester)
 - [`tcpip` — Harmony stack commands](#tcpip--harmony-stack-commands)
 - [What survives a reset](#what-survives-a-reset)
@@ -513,6 +514,127 @@ distinct from `iperf`'s own protocol. No argument shows the state.
 ```
 testserver: idle
 ```
+
+---
+
+## `bootload` — firmware update into the inactive flash bank
+
+Receives a new firmware image over the network and programs it into the flash
+bank the CPU is *not* executing from, while the bridge keeps forwarding. The
+control commands below go over this console; the image itself goes over a
+separate binary TCP port (default `5567`) that only exists between `arm` and the
+end of the transfer. Driven from the PC by `scripts/bootload.py`.
+
+A transfer on its own changes nothing about what the board boots: only the
+inactive bank is written. `commit` is the step that makes it real — it copies the
+emulated EEPROM (the `env` settings) into the other bank so the new firmware
+finds its network configuration where it looks for it, then issues `BKSWRST`,
+which swaps the banks and resets. Rollback is a second `commit`-less swap away:
+the previous image is still intact in what is now the inactive bank, so
+re-sending the old HEX restores it. Background:
+[`dual-bank-bootloader-plan.md`](dual-bank-bootloader-plan.md).
+
+| Command | Description |
+|---|---|
+| `bootload` | one-line status |
+| `bootload info` | bank, target window, limits, region locks, data port |
+| `bootload arm <bytes> <crc32hex>` | announce an image and open the data port |
+| `bootload abort` | cancel, close the port |
+| `bootload commit` | activate a verified image: copy the environment, swap banks, reset |
+| `bootload confirm` | keep the image the board just swapped to - cancels the automatic rollback |
+| `bootload verify <bytes> <crc32hex>` | CRC32 the **running** image at `0x0` and compare |
+| `bootload selftest [addr_hex]` | erase + write + read back one page in the inactive bank |
+
+```
+> bootload info
+bootload - dual-bank firmware update (receive, verify, commit)
+  running bank      : A (STATUS.AFIRST=1), mapped at 0x00000000
+  update target     : 0x00080000 .. 0x000FBFFF (bank B)
+  max image         : 507904 bytes (bank 524288 - EEPROM window 16384)
+  live env window   : 0x000FC000 .. 0x000FFFFF (never written here)
+  page / block      : 512 / 8192 bytes
+  region locks      : RUNLOCK=0xFFFFFFFF (1 = unlocked)
+  data port         : 5567
+  probation         : off (window 180s, swap #2)
+  note found at boot: magic=0x424C5052 state=2 count=2 crc=0xE40184BE rcause=0x08
+BL: state=IDLE bank=A rx=0 written=0 size=0 err=0 (none) probation=off
+```
+
+CRC32 is the ordinary IEEE 802.3 / zlib flavour, so `zlib.crc32()` on the PC and
+this firmware produce the same number for the same bytes.
+
+`selftest` is the bench proof that the inactive bank really is reachable at
+`0x00080000` and that erase and page write work there — run it while `iperf` or
+`testserver` traffic is going through the bridge to see that the application is
+not disturbed (read-while-write). It blocks the console for the duration of one
+block erase (50 ms typical, 200 ms worst case) and reports the measured times:
+
+```
+> bootload selftest
+bootload selftest: bank A is running; erasing+writing 0x00080000
+  erase 51230 us, write 1480 us, readback [0]=0xB0070000 [127]=0xB007007F
+BL: selftest PASS (0 mismatching words)
+```
+
+`commit` answers before it acts: it replies, waits ~500 ms so that reply reaches
+a Telnet client, copies the environment, reports the result on the serial console
+and swaps ~300 ms later. If the environment copy fails it does **not** swap - the
+board keeps running, the state stays `VERIFIED`, and `commit` can be retried.
+
+### Probation: an update that cannot be reached undoes itself
+
+A commit puts the image it swaps to **on probation**. The board starts a 180 s
+timer and says so on its console; `bootload` and `bootload info` show the time
+left (`probation=ARMED 137s left`). Only `bootload confirm` - sent by whoever
+actually reached the board over the network - keeps the new image. If the
+confirmation does not arrive, the board swaps back to the previous image on its
+own and reports the rollback on the next boot:
+
+```
+bootload: this image is ON PROBATION after a bank swap (#2).
+bootload: 'bootload confirm' within 180s keeps it - otherwise the board swaps back to the previous image.
+...
+bootload: not confirmed within 180s - swapping back to the previous image now
+bootload: the previous update was ROLLED BACK - it was not confirmed within 180s, so this (older) image was restored. Swap #2.
+```
+
+`scripts/bootload.py` sends the confirmation itself, right after `bootload
+verify` has proved that the image now running is the one it sent - so a normal
+update needs no thought. `--no-confirm` skips it, which is how the rollback path
+is tested.
+
+A plain reset or a power cycle during probation **cancels** it rather than
+triggering a rollback: the note is only honoured when the boot was actually
+caused by a bank swap (`RCAUSE.NVM`), so whoever intervened at the board keeps
+what they booted. The console says `discarding a stale probation note`.
+
+What probation does **not** cover: an image that faults before this module
+initialises never starts the timer. Nothing in software can help there - the
+recovery path stays SWD, and the previous image is still intact in the other
+bank.
+
+The `arm`/`abort`/`commit`/`verify` commands are meant to be driven by
+`scripts/bootload.py` - or by the Telnet GUI's **Bootload (network)** button,
+which is a window around that same module - not typed by hand:
+
+```
+python scripts/bootload.py --ip 192.168.0.12                # update, activate, verify, confirm
+python scripts/bootload.py --ip 192.168.0.12 --no-commit    # transfer only, no swap
+python scripts/bootload.py --ip 192.168.0.12 --no-confirm   # let the board roll it back
+python scripts/bootload.py --ip 192.168.0.12 --selftest     # just the bench proof
+python scripts/bootload.py --ip 192.168.0.12 --info
+```
+
+The tool runs the whole sequence: prepare, arm, transfer, verify, commit, wait
+for the board to come back, then prove with `bootload verify` that what is now
+running is what it sent - and, by reconnecting under the same IP, that the
+environment survived the swap.
+
+The HEX's NVM user-page record (fuses at `0x00804000`, outside both banks) is not
+sent: pyOCD skips it over SWD too, so neither path programs it. What the tool does
+check via `peek` is that the device's own fuses allow this mechanism at all -
+`BOOTPROT` must be `0xF` (no protected boot section) and `SBLK` must be 0
+(SmartEEPROM off).
 
 ---
 

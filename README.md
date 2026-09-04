@@ -145,6 +145,28 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
   received bytes back in fixed chunks, for bandwidth-ramp testing distinct
   from `iperf`. See [§8](#8-throughput-testing).
 
+### Firmware update over the network (`bootload` group)
+
+- The SAME54's NVM controller has two 512 KiB flash banks and an atomic swap
+  (`BKSWRST`). This firmware programs a new image into the bank it is *not*
+  executing from while the bridge keeps forwarding (read-while-write), verifies
+  it by CRC32, hands the persisted `env` settings over to that bank and swaps -
+  so a board can be updated over Ethernet, without a debug probe, and comes back
+  with its network configuration intact.
+- One button in the Telnet GUI: **Bootload (network)** opens a window with a
+  progress bar and runs the whole sequence - transfer, verify, commit, reboot,
+  post-check - then reconnects the GUI's own console.
+- **An update that comes up unreachable undoes itself.** The image the board
+  swaps to is on probation for 180 s; only a confirmation from someone who
+  actually reached it over the network keeps it, otherwise the board swaps back
+  to the previous image on its own.
+- Or from the command line, `python scripts\bootload.py --ip <board>`: it sends the
+  built HEX, waits for the reboot and proves that what is now running is what it
+  sent. A failed or interrupted transfer changes nothing - only the inactive bank
+  is written, and nothing boots from there until the swap.
+- Details: [`docs/dual-bank-bootloader-plan.md`](docs/dual-bank-bootloader-plan.md),
+  commands in [`docs/cli-reference.md`](docs/cli-reference.md).
+
 ### Telnet console (unique to this project — see §10)
 
 - A second, independent CLI console over TCP/23, alongside the EDBG serial

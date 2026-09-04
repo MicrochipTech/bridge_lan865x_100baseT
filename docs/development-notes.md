@@ -56,6 +56,17 @@ cli.bat --port COM8 --read 3 "reset"
   `python scripts\setup_compiler.py` to have been run once). Also archives the
   HEX plus the summary text with a timestamp under
   `firmware\...\dist\default\production\image\` (gitignored).
+- **Adding a new application source file needs two edits, not one.**
+  `firmware\tcpip_iperf_lan865x.X\nbproject\configurations.xml` is what
+  MPLAB X reads, but `build.bat` drives the *generated*
+  `nbproject\Makefile-default.mk`, which carries its own explicit file lists - so a
+  file added only to `configurations.xml` compiles in the IDE and fails at link
+  time from the shell (`undefined reference to ...`). Until the IDE regenerates
+  the makefile, add the new `.c` by hand in four places in
+  `Makefile-default.mk`: `SOURCEFILES`, `SOURCEFILES_QUOTED_IF_SPACED`,
+  `OBJECTFILES`, `OBJECTFILES_QUOTED_IF_SPACED`, plus a copy of a neighbouring
+  per-file build rule (there are two - one for the debug configuration, one for
+  production). Found while adding `bootload.c`, 2026-09-04.
 - `cli.py`'s `--read N` deliberately waits *at least* N seconds before
   exiting — wrapping it in an external `timeout M` with `M < N` kills it
   prematurely and can be misread as "the board is hanging" when it isn't.

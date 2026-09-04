@@ -38,6 +38,13 @@ import queue
 import time
 import socket
 
+# The network firmware update lives in its own module, deliberately GUI-free, so
+# it can be brought up and debugged from a command line (python scripts\bootload.py
+# --ip ...) without any Tk in the picture - and so this file only has to supply a
+# progress callback and a window. Same directory as this script, which Python puts
+# on sys.path for the script it runs, so a plain import is enough.
+import bootload
+
 try:
     import serial
 except ImportError:
@@ -1040,6 +1047,7 @@ class BridgeGUITelnet:
                 ("Build Timestamp", lambda: self.run_async_cmd("timestamp")),
                 ("Reset Device", self.reset_device),
                 ("Flash", self.flash_current_hex),
+                ("Bootload (network)", self.bootload_start),
                 ("Select Hex...", self.flash_select_hex),
                 ("Erase chip...", self.erase_chip),
             ]),
@@ -1917,6 +1925,191 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ------------------------------------------------------------------
+    # Firmware update over the network ("Bootload")
+    #
+    # The whole protocol lives in scripts\bootload.py; everything here is the
+    # window around it. The board programs the image into the flash bank it is
+    # not executing from, verifies it, hands the persisted env settings over to
+    # that bank and swaps - so this is a real update, over Ethernet, without a
+    # debug probe. See docs\dual-bank-bootloader-plan.md.
+    # ------------------------------------------------------------------
+
+    # Phase -> percent range on the bar. The transfer (phase 3) is the only one
+    # with byte-level progress and gets most of the bar; the others are single
+    # steps, and their ranges exist so the bar keeps moving through the commit
+    # and the reboot instead of sitting at "almost done" for 15 seconds.
+    BOOTLOAD_PHASE_PCT = {1: (0, 5), 2: (5, 6), 3: (6, 85), 4: (85, 90),
+                          5: (90, 92), 6: (92, 97), 7: (97, 100)}
+    BOOTLOAD_PHASE_TEXT = {1: "preparing", 2: "arming the board", 3: "transferring",
+                           4: "verifying in flash", 5: "committing (bank swap)",
+                           6: "waiting for the reboot", 7: "checking what is running"}
+    BOOTLOAD_UNCANCELLABLE_FROM = 5   # once the swap is in flight there is nothing to cancel
+
+    def bootload_start(self):
+        """Send the selected HEX to the board over the network and activate it."""
+        if not self.port_link:
+            self.set_error_status("Not connected")
+            messagebox.showwarning("Not connected",
+                                   "Connect to the board first - the update needs the "
+                                   "Telnet console to arm the board and to check the result "
+                                   "afterwards.")
+            return
+
+        hex_path = self._selected_hex_path
+        try:
+            image = bootload.load_image(hex_path)
+        except Exception as exc:
+            messagebox.showerror("Bootload", f"Cannot read {hex_path}:\n{exc}")
+            return
+
+        host = self.ip_var.get().strip()
+        if not messagebox.askyesno(
+                "Update firmware over the network?",
+                f"Send this image to {host} and activate it?\n\n"
+                f"File:  {hex_path.name}\n"
+                f"Size:  {image.size:,} bytes ({100.0 * image.size / bootload.BL_MAX_IMAGE:.0f}% of one bank)\n"
+                f"CRC32: 0x{image.crc:08X}\n\n"
+                "The board writes it into its inactive flash bank while it keeps running, "
+                "then swaps banks and reboots. A failed transfer changes nothing."):
+            return
+
+        user = self.telnet_user_var.get()
+        password = self.telnet_password_var.get()
+        self._bootload_cancel = threading.Event()
+        self._bootload_phase = 0
+        self._bootload_open_dialog(hex_path, image, host)
+
+        # This GUI's own Telnet session steps aside for the duration: the board
+        # reboots halfway through, which would leave it holding a dead socket,
+        # and bootload.py needs a console of its own to arm and check. The worker
+        # reconnects at the end through the same ("port_opened", link) message
+        # connect_device() uses, so the indicator, the terminal note and the
+        # Command Output line all behave exactly as after a manual reconnect.
+        self.disconnect_device()
+        threading.Thread(target=self._bootload_worker,
+                         args=(host, user, password, hex_path), daemon=True).start()
+
+    def _bootload_open_dialog(self, hex_path, image, host):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Firmware update over the network")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        dlg.protocol("WM_DELETE_WINDOW", lambda: None)   # no closing mid-update
+        dlg.grab_set()
+
+        header = (f"{hex_path.name}  ->  {host}\n"
+                  f"{image.size:,} bytes, CRC32 0x{image.crc:08X}")
+        ttk.Label(dlg, text=header, justify=tk.LEFT).pack(anchor="w", padx=12, pady=(12, 6))
+
+        self._bootload_phase_var = tk.StringVar(value="1/7  preparing ...")
+        ttk.Label(dlg, textvariable=self._bootload_phase_var).pack(anchor="w", padx=12)
+
+        self._bootload_bar = ttk.Progressbar(dlg, mode="determinate", maximum=100, length=460)
+        self._bootload_bar.pack(padx=12, pady=(4, 8))
+
+        self._bootload_log_box = tk.Text(dlg, height=12, width=74, state=tk.DISABLED, wrap=tk.WORD)
+        self._bootload_log_box.pack(padx=12, pady=(0, 8))
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self._bootload_cancel_btn = ttk.Button(btns, text="Cancel", command=self._bootload_on_cancel)
+        self._bootload_cancel_btn.pack(side=tk.RIGHT)
+        self._bootload_close_btn = ttk.Button(btns, text="Close", state=tk.DISABLED,
+                                              command=lambda: self._bootload_close_dialog())
+        self._bootload_close_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._bootload_dialog = dlg
+
+    def _bootload_close_dialog(self):
+        if getattr(self, "_bootload_dialog", None) is not None:
+            self._bootload_dialog.grab_release()
+            self._bootload_dialog.destroy()
+            self._bootload_dialog = None
+
+    def _bootload_on_cancel(self):
+        self._bootload_cancel.set()
+        self._bootload_cancel_btn.config(state=tk.DISABLED)
+        self._bootload_log("cancelling ...")
+
+    def _bootload_log(self, line):
+        if getattr(self, "_bootload_log_box", None) is None:
+            return
+        self._bootload_log_box.config(state=tk.NORMAL)
+        self._bootload_log_box.insert(tk.END, line.rstrip() + "\n")
+        self._bootload_log_box.see(tk.END)
+        self._bootload_log_box.config(state=tk.DISABLED)
+
+    def _bootload_on_progress(self, phase, name, done, total):
+        lo, hi = self.BOOTLOAD_PHASE_PCT.get(phase, (0, 100))
+        if phase == 3 and total:
+            pct = lo + (hi - lo) * done / total
+            self._bootload_phase_var.set(
+                f"{phase}/7  transferring  {done // 1024} KiB / {total // 1024} KiB")
+        else:
+            pct = lo
+            self._bootload_phase_var.set(
+                f"{phase}/7  {self.BOOTLOAD_PHASE_TEXT.get(phase, name)} ...")
+        self._bootload_bar["value"] = pct
+        if phase >= self.BOOTLOAD_UNCANCELLABLE_FROM:
+            self._bootload_cancel_btn.config(state=tk.DISABLED)
+        self._bootload_phase = phase
+
+    def _bootload_on_done(self, ok, message):
+        self._bootload_bar["value"] = 100 if ok else self._bootload_bar["value"]
+        self._bootload_phase_var.set("done - the board is running the new firmware" if ok
+                                     else "failed - the board still runs its previous firmware")
+        self._bootload_log(("OK: " if ok else "FAILED: ") + message)
+        self._bootload_cancel_btn.config(state=tk.DISABLED)
+        self._bootload_close_btn.config(state=tk.NORMAL)
+        if getattr(self, "_bootload_dialog", None) is not None:
+            self._bootload_dialog.protocol("WM_DELETE_WINDOW", self._bootload_close_dialog)
+        if ok:
+            self.set_status("Bootload OK", duration=5000)
+        else:
+            self.set_error_status(f"Bootload failed: {message}")
+
+    def _bootload_worker(self, host, user, password, hex_path):
+        """Runs the update off the main thread. Everything it wants to show goes
+        through result_queue, like every other worker in this file - no Tk call
+        ever happens off the main thread."""
+        q = self.result_queue
+        ok = False
+        # The board allows two Telnet sessions and reaps a closed one from its own
+        # 100 ms task, so a console opened in the same breath as the one this GUI
+        # just dropped can be accepted and closed again without a prompt. bootload.py
+        # retries for exactly this reason; giving it a head start costs nothing and
+        # keeps the first attempt from being the one that fails.
+        time.sleep(1.0)
+        try:
+            result = bootload.run_update(
+                host, hex_path, user, password,
+                data_port=int(self.config.get("bootload_port", bootload.DATA_PORT)),
+                progress=lambda phase, name, done, total: q.put(("bl_progress", phase, name, done, total)),
+                log=lambda line: q.put(("bl_log", str(line))),
+                cancel=self._bootload_cancel.is_set)
+            ok = True
+            message = (f"{result['size']:,} bytes running from the other bank "
+                       f"(crc 0x{result['crc']:08X}), environment kept")
+        except Exception as exc:
+            message = str(exc)
+        q.put(("bl_done", ok, message))
+
+        # Reconnect this GUI's own console, the same way connect_device() does -
+        # with the same tolerance for the session-reap gap described above, and a
+        # little extra patience because the board may have only just finished
+        # rebooting.
+        last = ""
+        for attempt in range(4):
+            link = TelnetLink(host, q, username=user, password=password)
+            try:
+                link.open()
+                q.put(("port_opened", link))
+                return
+            except Exception as exc:
+                last = str(exc)
+                time.sleep(1.5)
+        q.put(("port_failed", f"reconnect after the update failed: {last}"))
+
     @staticmethod
     def clean_response(command: str, output: str) -> str:
         """Strip the command echo and prompt characters from the response."""
@@ -2010,6 +2203,17 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                         messagebox.showerror(
                             f"{label} failed",
                             "flash_same54.py reported an error - see Command Output for details.")
+
+                elif result[0] == "bl_progress":
+                    _, phase, name, done, total = result
+                    self._bootload_on_progress(phase, name, done, total)
+
+                elif result[0] == "bl_log":
+                    self._bootload_log(result[1])
+
+                elif result[0] == "bl_done":
+                    _, ok, message = result
+                    self._bootload_on_done(ok, message)
 
                 elif result[0] == "register_read":
                     _, addr, success, value = result

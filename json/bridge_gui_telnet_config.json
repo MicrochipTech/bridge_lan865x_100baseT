@@ -2,6 +2,7 @@
   "ip": "192.168.0.12",
   "telnet_user": "admin",
   "telnet_password": "password",
+  "bootload_port": 5567,
   "bridge": {
     "ip0": "192.168.0.11",
     "mask0": "255.255.255.0",

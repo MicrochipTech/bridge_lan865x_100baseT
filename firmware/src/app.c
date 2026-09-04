@@ -43,6 +43,7 @@
 #include "port_mirror.h"
 #include "noip_test.h"
 #include "testserver.h"
+#include "bootload.h"
 #include "crashlog.h"
 #include "cpuload.h"
 #include "leds.h"
@@ -794,6 +795,7 @@ void APP_Initialize ( void )
     LAN865X_DIAG_Initialize();
     NOIP_Initialize();
     TESTSERVER_Initialize();
+    BOOTLOAD_Initialize();
     /* MIRROR_Initialize() is deferred to APP_STATE_SERVICE_TASKS, NOT called here:
      * unlike the other three (which only register CLI commands), it allocates its
      * packet pool from the TCP/IP heap via TCPIP_PKT_PacketAlloc(). At this point
@@ -1136,6 +1138,10 @@ void APP_Tasks ( void )
 
             /* TCP echo test server - see testserver.c */
             TESTSERVER_Tasks();
+
+            /* Firmware self-update into the inactive flash bank - see bootload.c.
+             * Does nothing at all until 'bootload arm' opens its data port. */
+            BOOTLOAD_Tasks();
 
             /* === Deferred packet log output (max 10 entries per APP_Tasks iteration) === */
             if (ticks_per_ms > 0u) {

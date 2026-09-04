@@ -968,6 +968,7 @@
       <itemPath>../src/port_mirror.c</itemPath>
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>
+      <itemPath>../src/bootload.c</itemPath>
       <itemPath>../src/crashlog.c</itemPath>
       <itemPath>../src/cpuload.c</itemPath>
       <itemPath>../src/leds.c</itemPath>
@@ -1133,7 +1134,7 @@
         <property key="oXC16ld-stackguard" value="16"/>
         <property key="oXC32ld-extra-opts" value=""/>
         <property key="optimization-level" value="-O2"/>
-        <property key="preprocessor-macros" value="ROM_LENGTH=0xfc000"/>
+        <property key="preprocessor-macros" value="ROM_LENGTH=0x7c000"/>
         <property key="remove-unused-sections" value="true"/>
         <property key="report-memory-usage" value="false"/>
         <property key="serial-length" value=""/>

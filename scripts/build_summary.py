@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+import zlib
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -244,8 +245,56 @@ def read_build_timestamp(elf_path: str) -> tuple[str, str]:
 # 5. Format / print summary
 # ---------------------------------------------------------------------------
 
+BOOTLOAD_MAX_IMAGE = 0x7C000   # one flash bank minus the emulated-EEPROM window
+
+
+def read_bootload_image(hex_path: str) -> dict:
+    """Size and CRC32 of the flat image the network bootloader would send.
+
+    Not the same number as the linker's "program memory used": that counts only
+    the bytes in sections, this is the whole span from 0 to the highest code
+    address, gaps filled with 0xFF, which is what actually gets programmed page
+    by page - and what scripts/bootload.py announces in 'bootload arm'. Records
+    outside the image window (the NVM user page at 0x00804000) are excluded, as
+    both update paths leave those alone.
+
+    The ceiling is real, not advisory: with dual-bank updates the firmware must
+    fit in one bank below the environment hand-over region, so an image at or
+    above BOOTLOAD_MAX_IMAGE can no longer be updated over the network.
+    """
+    if not os.path.isfile(hex_path):
+        return {}
+    chunks, base, top = {}, 0, 0
+    with open(hex_path) as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line.startswith(":"):
+                continue
+            rec = bytes.fromhex(line[1:])
+            count, offset, rtype = rec[0], (rec[1] << 8) | rec[2], rec[3]
+            payload = rec[4:4 + count]
+            if rtype == 0x04:
+                base = ((payload[0] << 8) | payload[1]) << 16
+            elif rtype == 0x02:
+                base = ((payload[0] << 8) | payload[1]) << 4
+            elif rtype == 0x00:
+                addr = base + offset
+                if addr + count <= BOOTLOAD_MAX_IMAGE:
+                    chunks[addr] = payload
+                    top = max(top, addr + count)
+            elif rtype == 0x01:
+                break
+    if top == 0:
+        return {}
+    data = bytearray(b"\xFF" * top)
+    for addr, payload in chunks.items():
+        data[addr:addr + len(payload)] = payload
+    return {"size": top, "crc": zlib.crc32(bytes(data)) & 0xFFFFFFFF,
+            "limit": BOOTLOAD_MAX_IMAGE}
+
+
 def print_summary(mem: dict, map_info: dict, core_irqs: list, periph_irqs: list,
-                  build_ts: str = "") -> str:
+                  build_ts: str = "", image: dict | None = None) -> str:
     """Prints the build summary to stdout and returns it as a string."""
     buf = io.StringIO()
 
@@ -275,6 +324,18 @@ def print_summary(mem: dict, map_info: dict, core_irqs: list, periph_irqs: list,
         out(f"    Free   : {free:>8,} bytes  ({_kib(free):>10})")
         out(f"    Total  : {total:>8,} bytes  ({_kib(total):>10})")
         out(f"    {_bar(used, total)}")
+
+    # --- Network-update image ---
+    if image:
+        size, limit = image["size"], image["limit"]
+        out()
+        out(f"  Bootload image (what 'bootload arm' would announce)")
+        out(f"    Size   : {size:>8,} bytes  ({_kib(size):>10})  {_pct(size, limit)} of one bank")
+        out(f"    CRC32  : 0x{image['crc']:08X}")
+        if size >= limit:
+            out(f"    *** TOO BIG for a dual-bank update: the limit is {limit:,} bytes")
+            out(f"        (one 512 KiB bank minus the 16 KiB environment region)")
+        out(f"    {_bar(size, limit)}")
 
     # --- RAM ---
     # memoryfile.xml's "data" region is .data+.bss only (statically-allocated
@@ -396,7 +457,8 @@ def main() -> None:
     core_irqs, periph_irqs = read_active_interrupts(elf_path, xc32_bin)
     build_ts, ts_tag       = read_build_timestamp(elf_path)
 
-    summary_text = print_summary(mem, map_info, core_irqs, periph_irqs, build_ts)
+    image = read_bootload_image(os.path.splitext(elf_path)[0] + ".hex")
+    summary_text = print_summary(mem, map_info, core_irqs, periph_irqs, build_ts, image)
     write_image(elf_path, summary_text, ts_tag)
 
 
