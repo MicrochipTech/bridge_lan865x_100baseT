@@ -45,6 +45,7 @@ grep -rn "TEMP DIAG"   firmware/src/config/default/
 | 12 | `tasks.c` — `CPULOAD_Enter()`/`CPULOAD_Exit()` hooks around each `SYS_Tasks()` call | Loses the `cpuload` command's per-task cycle profiling; nothing else changes | Low — diagnostic feature only |
 | 13 | `interrupts.c` — vector table repointed at `cpuload.c`'s `CPULOAD_ISR_*()` wrappers | Loses the `cpuload` command's per-interrupt cycle profiling; nothing else changes | Low — diagnostic feature only |
 | 14 | `library\tcpip\src\tcpip_manager.c` — `TCPIPStackPacketTx()` doesn't assert on a transient "can't send right now" result | A large console `dump`/other bulk output over Telnet floods the serial console with `TCPIP Stack Assert` and wedges the round-robin loop under it, on a T1S node whose own TX queue is momentarily full | High — availability, heavy-Telnet-output paths |
+| 15 | `system\command\sys_command.h` — `MAX_CMD_GROUP` 8 → 12 | The ninth command group silently fails to register: whichever module calls `SYS_CMD_ADDGRP()` last loses all of its commands on a running board | High — silent feature loss, no build error |
 | — | `driver\lan865x\src\dynamic\tc6\tc6.c` + `drv_lan865x_api.c` — diagnostic prints | Loses an in-progress debugging aid, nothing else | None (temporary, currently disabled) |
 
 Recommended re-apply order after any `Generate Code` run: **1 first** (nothing else
@@ -904,6 +905,48 @@ Toggle live: build, find `g_tc6DiagEnable`'s address in the `.map` file
 (`grep g_tc6DiagEnable *.map`), then `poke <addr> 1` / `poke <addr> 0` over the CLI.
 No MCC exception documentation needed for these two blocks specifically once removed
 — they exist only to be deleted.
+
+---
+
+## 15. `system\command\sys_command.h` — `MAX_CMD_GROUP` 8 → 12
+
+**What:** one constant.
+
+```c
+#define         MAX_CMD_GROUP   12      /* MCC default: 8 */
+```
+
+**Why:** the command processor holds its groups in a fixed array,
+`usrCmdTbl[MAX_CMD_GROUP]` (`sys_command.c`), and `SYS_CMD_ADDGRP()` returns
+`false` when it is full. Nothing in the system reacts to that return value
+except an optional print in the caller - so a full table does not fail loudly,
+it just means one module's commands are not there.
+
+This project is at the limit. Nine groups want a slot: `Test`, `env`, `lan`,
+`span`, `noip`, `testserver` and `bootload` from the application, plus `tcpip`
+and `iperf` from the Harmony stack.
+
+**How it showed up (2026-09-04):** adding the `bootload` group cost the `span`
+group. `MIRROR_Initialize()` is deliberately deferred to
+`APP_STATE_SERVICE_TASKS` (it allocates from the TCP/IP heap, see the comment in
+`app.c`), so it registers *last* and was the one that lost. On the board this
+looked like `mirror`, `sniffer` and the rest of `span` answering
+`*** Command Processor: unknown command. ***`, with one line in the boot log as
+the only evidence:
+
+```
+MIRROR: SYS_CMD_ADDGRP failed
+```
+
+**Cost:** `sizeof(SYS_CMD_DESCRIPTOR_TABLE)` per unused slot, about 16 bytes of
+RAM each.
+
+**No MCC field exists for this** — the value is generated from the command
+processor's template, not exposed in the configurator.
+
+**If lost:** whichever module registers last loses its whole command group,
+silently, at the next `Generate Code`. The tell is the `SYS_CMD_ADDGRP failed`
+line in the boot log; the check is `help`, which lists the groups that made it.
 
 ---
 

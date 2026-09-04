@@ -1,0 +1,24 @@
+diff --git a/firmware/src/config/default/system/command/sys_command.h b/firmware/src/config/default/system/command/sys_command.h
+index d8a1426..9a62083 100644
+--- a/firmware/src/config/default/system/command/sys_command.h
++++ b/firmware/src/config/default/system/command/sys_command.h
+@@ -143,7 +143,18 @@
+     None.
+ 
+ */
+-#define         MAX_CMD_GROUP   8
++/* HAND-PATCH to MCC-generated code, documented exception (docs/mcc-generated-code-patches.md).
++ * Raised from the MCC default of 8. The project registers eight command groups
++ * already - Test, env, lan, span, noip, testserver, bootload from the
++ * application, plus tcpip and iperf from the Harmony stack - and
++ * SYS_CMD_ADDGRP() has no way to report "table full" other than a return value
++ * nobody sees: the ninth registration simply does not happen. That is not a
++ * theoretical limit. Adding 'bootload' silently cost the 'span' group
++ * (mirror/sniffer) on 2026-09-04, because MIRROR_Initialize() is deferred to
++ * APP_STATE_SERVICE_TASKS and therefore registers last: the commands were gone
++ * from a running board with nothing in the log but one line,
++ * "MIRROR: SYS_CMD_ADDGRP failed". Costs ~16 bytes of RAM per unused slot. */
++#define         MAX_CMD_GROUP   12
+ 
+ 
+ // *****************************************************************************
