@@ -14,10 +14,15 @@
     (8 bytes, net_pres_local.h) to every call after fpOpen, so the conn
     struct's address is all that's stored there.
 
-    Bring-up only: fpInit loads wolfSSL's built-in test RSA-2048 cert/key
-    (USE_CERT_BUFFERS_2048, wolfssl/certs_test.h) rather than a real
-    provisioned certificate - fine for verifying this compiles/links/fits,
-    not for anything actually exposed to a network.
+    Bring-up only: fpInit loads this project's own generated RSA-2048 CA/
+    server cert/key (bridge_certs.h, see certs/bridge/ for the source .pem
+    files and how to regenerate) - NOT wolfSSL's public test certs
+    (wolfssl/certs_test.h), which turned out to be both expired (all dated
+    2022-2024) and mismatched (client_cert_der_2048 does not chain to
+    ca_cert_der_2048 at all - verified with `openssl verify`, it is an
+    unrelated self-signed cert). The CA's own private key still lives in this
+    repo (certs/bridge/ca_key.pem), which is fine for bring-up but must not
+    happen for anything actually exposed to a network - see bridge_certs.h.
 *******************************************************************************/
 
 #include "net_pres_enc_glue.h"
@@ -27,7 +32,7 @@
 #include <string.h>
 
 #include "wolfssl/ssl.h"
-#include "wolfssl/certs_test.h"
+#include "bridge_certs.h"
 
 typedef struct {
     WOLFSSL   *ssl;
@@ -91,13 +96,32 @@ static bool EncGlue_Init(struct S_NET_PRES_TransportObject *transObject)
     wolfSSL_CTX_SetIORecv(s_ctx, EncGlue_IoRecv);
     wolfSSL_CTX_SetIOSend(s_ctx, EncGlue_IoSend);
 
-    /* Bring-up cert/key only - see file header comment. */
-    if (wolfSSL_CTX_use_certificate_buffer(s_ctx, server_cert_der_2048,
-            sizeof_server_cert_der_2048, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) {
+    /* Bring-up cert/key only - see file header comment. This project's own
+       CA/server cert+key (bridge_certs.h), not wolfSSL's test PKI. */
+    if (wolfSSL_CTX_use_certificate_buffer(s_ctx, g_bridge_server_cert_der,
+            (long)g_bridge_server_cert_der_len, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) {
         return false;
     }
-    if (wolfSSL_CTX_use_PrivateKey_buffer(s_ctx, server_key_der_2048,
-            sizeof_server_key_der_2048, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) {
+    if (wolfSSL_CTX_use_PrivateKey_buffer(s_ctx, g_bridge_server_key_der,
+            (long)g_bridge_server_key_der_len, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) {
+        return false;
+    }
+
+    /* Mutual TLS: a completed handshake alone is not access control - it
+       only proves *a* TLS client talked to us, not *which* one. Require the
+       client to present a certificate and reject the handshake outright if
+       it doesn't chain up to the CA below (WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT
+       fails a bare "no certificate" the same as a wrong one). This project's
+       own CA (bridge_certs.h) signs both the server cert above and the
+       client cert issued to whoever is meant to reach this Telnet/bootload
+       (certs/bridge/client_cert.pem + client_key.pem) - unlike wolfSSL's
+       test PKI (see file header), server and client here actually chain to
+       the same CA (verified with `openssl verify`). Still bring-up-grade:
+       the CA private key sits in this repo (certs/bridge/ca_key.pem), which
+       a real deployment must not do. */
+    wolfSSL_CTX_set_verify(s_ctx, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+    if (wolfSSL_CTX_load_verify_buffer(s_ctx, g_bridge_ca_cert_der,
+            (long)g_bridge_ca_cert_der_len, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) {
         return false;
     }
 

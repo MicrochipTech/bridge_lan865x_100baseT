@@ -210,7 +210,7 @@ static const DRV_SPI_INIT drvSPI0InitData =
 static const DRV_MIIM_INIT drvMiimInitData_0;
 
 /* Forward declaration of PHY initialization data */
-const DRV_ETHPHY_INIT tcpipPhyInitData_LAN867x;
+const DRV_ETHPHY_INIT tcpipPhyInitData_LAN8742A;
 
 
 
@@ -499,10 +499,10 @@ const TCPIP_MODULE_MAC_PIC32C_CONFIG tcpipGMACInitData =
        .txPrioNumToQueIndx = txPrioNumToQueIndxGmac,
        .rxPrioNumToQueIndx = rxPrioNumToQueIndxGmac,
        .ethFlags               = TCPIP_GMAC_ETH_OPEN_FLAGS,    
-       .linkInitDelay          = DRV_LAN867x_PHY_LINK_INIT_DELAY,
+       .linkInitDelay          = DRV_LAN8742A_PHY_LINK_INIT_DELAY,
        .ethModuleId            = TCPIP_GMAC_MODULE_ID,
        .pPhyBase               = &DRV_ETHPHY_OBJECT_BASE_Default,
-       .pPhyInit               = &tcpipPhyInitData_LAN867x,
+       .pPhyInit               = &tcpipPhyInitData_LAN8742A,
        .checksumOffloadRx      = DRV_GMAC_RX_CHKSM_OFFLOAD,
        .checksumOffloadTx      = DRV_GMAC_TX_CHKSM_OFFLOAD,
        .macTxPrioNum           = TCPIP_GMAC_TX_PRIO_COUNT,
@@ -641,22 +641,22 @@ static const NET_PRES_INIT_DATA netPresInitData =
   
  
 
-/*** LAN867x PHY Driver Time-Out Initialization Data ***/
-DRV_ETHPHY_TMO drvlan867xTmo =
+/*** LAN8742A PHY Driver Time-Out Initialization Data ***/
+DRV_ETHPHY_TMO drvlan8742aTmo =
 {
-    .resetTmo = DRV_ETHPHY_LAN867x_RESET_CLR_TMO,
-    .aNegDoneTmo = DRV_ETHPHY_LAN867x_NEG_DONE_TMO,
-    .aNegInitTmo = DRV_ETHPHY_LAN867x_NEG_INIT_TMO,
+    .resetTmo = DRV_ETHPHY_LAN8742A_RESET_CLR_TMO,
+    .aNegDoneTmo = DRV_ETHPHY_LAN8742A_NEG_DONE_TMO,
+    .aNegInitTmo = DRV_ETHPHY_LAN8742A_NEG_INIT_TMO,
 };
 
 /*** ETH PHY Initialization Data ***/
-const DRV_ETHPHY_INIT tcpipPhyInitData_LAN867x =
+const DRV_ETHPHY_INIT tcpipPhyInitData_LAN8742A =
 {
-    .ethphyId               = DRV_LAN867x_PHY_PERIPHERAL_ID,
-    .phyAddress             = DRV_LAN867x_PHY_ADDRESS,
-    .phyFlags               = DRV_LAN867x_PHY_CONFIG_FLAGS,
-    .pPhyObject             = &DRV_ETHPHY_OBJECT_LAN867x,
-    .ethphyTmo              = &drvlan867xTmo,
+    .ethphyId               = DRV_LAN8742A_PHY_PERIPHERAL_ID,
+    .phyAddress             = DRV_LAN8742A_PHY_ADDRESS,
+    .phyFlags               = DRV_LAN8742A_PHY_CONFIG_FLAGS,
+    .pPhyObject             = &DRV_ETHPHY_OBJECT_LAN8742A,
+    .ethphyTmo              = &drvlan8742aTmo,
     .pMiimObject            = &DRV_MIIM_OBJECT_BASE_Default,
     .pMiimInit              = &drvMiimInitData_0,
     .miimIndex              = 0,

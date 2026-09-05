@@ -136,7 +136,11 @@ typedef enum {
 
 static bl_state_t s_state = BL_IDLE;
 static bl_err_t   s_err = BL_E_NONE;
-static TCP_SOCKET s_sock = INVALID_SOCKET;
+/* NET_PRES, not a raw TCP_SOCKET, since this branch's t1s-t1s-bridge-lan8670
+   experiment (session log) puts the update transfer behind the same mTLS
+   requirement as Telnet - the socket type below is what actually requests
+   that (see BL_STATE_WAIT_CONN / TCPIP_TCP_ServerOpen's replacement). */
+static NET_PRES_SKT_HANDLE_T s_sock = INVALID_SOCKET;
 static TCP_PORT   s_port = BL_PORT_DEFAULT;
 
 static uint32_t s_size;                                      /* announced image size, bytes */
@@ -277,7 +281,7 @@ static uint16_t bl_nvm_errors(void)
 static void bl_close_socket(void)
 {
     if (s_sock != INVALID_SOCKET) {
-        (void)TCPIP_TCP_Close(s_sock);   /* graceful by default: sends what is still queued, then FIN */
+        NET_PRES_SocketClose(s_sock);   /* graceful by default: sends what is still queued, then FIN */
         s_sock = INVALID_SOCKET;
     }
 }
@@ -285,8 +289,8 @@ static void bl_close_socket(void)
 static void bl_sock_say(const char *line)
 {
     if (s_sock != INVALID_SOCKET) {
-        (void)TCPIP_TCP_ArrayPut(s_sock, (const uint8_t *)line, (uint16_t)strlen(line));
-        (void)TCPIP_TCP_Flush(s_sock);
+        (void)NET_PRES_SocketWrite(s_sock, (const uint8_t *)line, (uint16_t)strlen(line));
+        (void)NET_PRES_SocketFlush(s_sock);
     }
 }
 
@@ -483,7 +487,7 @@ static void bl_start_verify(void)
 
 static void bl_recv_header(void)
 {
-    uint16_t ready = TCPIP_TCP_GetIsReady(s_sock);
+    uint16_t ready = NET_PRES_SocketReadIsReady(s_sock);
     uint32_t want = (uint32_t)sizeof s_hdr - s_hdr_fill;
     uint16_t got;
 
@@ -493,7 +497,7 @@ static void bl_recv_header(void)
     if ((uint32_t)ready < want) {
         want = ready;
     }
-    got = TCPIP_TCP_ArrayGet(s_sock, ((uint8_t *)s_hdr) + s_hdr_fill, (uint16_t)want);
+    got = NET_PRES_SocketRead(s_sock, ((uint8_t *)s_hdr) + s_hdr_fill, (uint16_t)want);
     s_hdr_fill += got;
     if (got > 0u) {
         bl_mark_progress();
@@ -563,7 +567,7 @@ static void bl_recv_image(void)
         }
 
         {
-            uint16_t ready = TCPIP_TCP_GetIsReady(s_sock);
+            uint16_t ready = NET_PRES_SocketReadIsReady(s_sock);
             uint32_t want = BL_PAGE - s_fill;
             uint16_t got;
 
@@ -576,7 +580,7 @@ static void bl_recv_image(void)
             if ((uint32_t)ready < want) {
                 want = ready;
             }
-            got = TCPIP_TCP_ArrayGet(s_sock, ((uint8_t *)s_page) + s_fill, (uint16_t)want);
+            got = NET_PRES_SocketRead(s_sock, ((uint8_t *)s_page) + s_fill, (uint16_t)want);
             if (got == 0u) {
                 break;   /* ready>0 but nothing handed over: do not spin the main loop */
             }
@@ -772,8 +776,19 @@ void BOOTLOAD_Tasks(void)
         break;
 
     case BL_WAIT_CONN:
-        if (TCPIP_TCP_IsConnected(s_sock)) {
-            (void)TCPIP_TCP_WasReset(s_sock);   /* clear the stack's reset flag, as iperf.c/testserver.c do */
+        /* NET_PRES_SocketIsConnected() alone is TCP-level only - the encrypted
+           socket type means a TCP peer can be "connected" well before the TLS
+           handshake (and this board's mTLS client-cert check) finishes or
+           fails. NET_PRES_SocketIsSecure() is what actually means "TLS is up,
+           safe to start reading application bytes" - without it, a client's
+           ClientHello would get parsed as this protocol's magic/size/crc
+           header and fail with BL_E_HEADER instead of ever reaching a real
+           transfer. A client that fails the cert check (or never presents
+           one) just never satisfies this and eventually hits the timeout
+           below - same as "no client showed up" from this state machine's
+           point of view. */
+        if (NET_PRES_SocketIsConnected(s_sock) && NET_PRES_SocketIsSecure(s_sock)) {
+            (void)NET_PRES_SocketWasReset(s_sock);   /* clear the stack's reset flag, as iperf.c/testserver.c do */
             s_hdr_fill = 0u;
             s_state = BL_RECV_HDR;
             bl_mark_progress();
@@ -787,7 +802,7 @@ void BOOTLOAD_Tasks(void)
 
     case BL_RECV_HDR:
     case BL_RECV_IMG:
-        if (TCPIP_TCP_WasReset(s_sock) || TCPIP_TCP_WasDisconnected(s_sock)) {
+        if (NET_PRES_SocketWasReset(s_sock) || NET_PRES_SocketWasDisconnected(s_sock)) {
             bl_fail(BL_E_CONN, "connection-lost");
             break;
         }
@@ -868,7 +883,14 @@ static void bl_cmd_arm(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv)
         return;
     }
 
-    s_sock = TCPIP_TCP_ServerOpen(IP_ADDRESS_TYPE_IPV4, (TCP_PORT)s_port, 0);
+    /* HAND-PATCH (branch t1s-t1s-bridge-lan8670, not persisted anywhere a
+       Generate Code run would preserve it): was a plain TCPIP_TCP_ServerOpen.
+       Encrypted socket type reuses the same mTLS provider/cert Telnet uses
+       (net_pres_enc_glue.c) - a client without a matching certificate never
+       reaches BL_RECV_HDR, see the BL_WAIT_CONN comment above. */
+    s_sock = NET_PRES_SocketOpen(0, NET_PRES_SKT_ENCRYPTED_STREAM_SERVER,
+                                  (NET_PRES_SKT_ADDR_T)IP_ADDRESS_TYPE_IPV4,
+                                  (NET_PRES_SKT_PORT_T)s_port, NULL, NULL);
     if (s_sock == INVALID_SOCKET) {
         s_err = BL_E_SOCKET;
         CMD_PRINT(pCmdIO, "BL: ERR server-open\n\r");

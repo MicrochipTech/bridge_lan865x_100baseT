@@ -279,7 +279,16 @@ bool TCPIP_TELNET_Initialize(const TCPIP_STACK_MODULE_CTRL* const stackCtrl, con
         pDcpt = telnetDcpt;
         for(tIx = 0; tIx < (size_t)telnetConfigData.nConnections; tIx++)
         {
-            pDcpt->telnetSkt = (tSkt = NET_PRES_SocketOpen(0, NET_PRES_SKT_DEFAULT_STREAM_SERVER, (NET_PRES_SKT_ADDR_T)IP_ADDRESS_TYPE_ANY, telnetConfigData.listenPort, NULL, NULL));
+            /* HAND-PATCH (branch t1s-t1s-bridge-lan8670, not yet in patches/ -
+               a Generate Code run will revert this): MCC generates a plain
+               stream server here. This board only has one TLS provider
+               (net_pres_enc_glue.c) registered as pProvObject_ss, so an
+               encrypted socket type is enough to make Telnet require TLS -
+               see TCPIP_TELNET_MAX_CONNECTIONS above for the matching
+               one-session cap. A plain (non-TLS) telnet client can no longer
+               connect to this port once this is in - by design, not an
+               oversight. */
+            pDcpt->telnetSkt = (tSkt = NET_PRES_SocketOpen(0, NET_PRES_SKT_ENCRYPTED_STREAM_SERVER, (NET_PRES_SKT_ADDR_T)IP_ADDRESS_TYPE_ANY, telnetConfigData.listenPort, NULL, NULL));
             sigHandle = NET_PRES_SocketSignalHandlerRegister(tSkt, (uint16_t)TCPIP_TCP_SIGNAL_RX_DATA, &F_TelnetSocketRxSignalHandler, NULL);
             if(tSkt == INVALID_SOCKET || sigHandle == NULL)
             {

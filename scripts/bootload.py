@@ -33,6 +33,7 @@ not in scripts/requirements.txt.
 
 import argparse
 import socket
+import ssl
 import struct
 import sys
 import time
@@ -46,6 +47,26 @@ BL_MAX_IMAGE = 0x7C000                     # one bank minus the emulated-EEPROM 
 USER_PAGE_ADDR = 0x00804000                # fuses - never sent, only inspected
 
 RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100baseT.hex"
+
+# Both the console (Telnet, TCP/23) and the image data port (TCP/5567) require
+# TLS with a client certificate now - see net_pres_enc_glue.c and
+# bridge_gui_telnet.py's _wrap_telnet_tls(), which this mirrors. Same CA/
+# client identity, same OP_LEGACY_SERVER_CONNECT workaround (confirmed live
+# against real hardware: this embedded wolfSSL build doesn't send the RFC 5746
+# renegotiation_info extension, which OpenSSL 3.x otherwise insists on).
+TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "ca_cert.pem"
+TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "client_cert.pem"
+TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "bridge" / "client_key.pem"
+
+
+def _wrap_tls(sock, host):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cafile=str(TLS_CA_CERT))
+    ctx.load_cert_chain(certfile=str(TLS_CLIENT_CERT), keyfile=str(TLS_CLIENT_KEY))
+    ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    return ctx.wrap_socket(sock, server_hostname=host)
 
 LOGIN_TIMEOUT = 10.0
 REPLY_TIMEOUT = 5.0
@@ -160,7 +181,12 @@ class Console:
 
     def _open_once(self):
         self.buf = b""
-        self.sock = socket.create_connection((self.ip, self.port), timeout=LOGIN_TIMEOUT)
+        sock = socket.create_connection((self.ip, self.port), timeout=LOGIN_TIMEOUT)
+        try:
+            self.sock = _wrap_tls(sock, self.ip)
+        except Exception:
+            sock.close()
+            raise
         self.sock.settimeout(0.2)
         self._until([b"Login:"], LOGIN_TIMEOUT)
         self.sock.sendall(self.user.encode("latin-1") + b"\r\n")
@@ -322,7 +348,12 @@ def run_update(ip, hex_path=RELEASE_HEX, user="admin", password="password",
         header = struct.pack("<III", BL_MAGIC, image.size, image.crc)
         header += struct.pack("<I", zlib.crc32(header) & 0xFFFFFFFF)
 
-        data_sock = socket.create_connection((ip, data_port), timeout=10.0)
+        data_sock_raw = socket.create_connection((ip, data_port), timeout=10.0)
+        try:
+            data_sock = _wrap_tls(data_sock_raw, ip)
+        except Exception:
+            data_sock_raw.close()
+            raise
         try:
             data_sock.sendall(header)
             sent = 0

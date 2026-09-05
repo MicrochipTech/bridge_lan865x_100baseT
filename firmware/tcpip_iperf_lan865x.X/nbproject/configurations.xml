@@ -14,11 +14,12 @@
               <logicalFolder name="src" displayName="src" projectFiles="true">
                 <logicalFolder name="dynamic" displayName="dynamic" projectFiles="true">
                   <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_regs.h</itemPath>
-                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan867x.h</itemPath>
+                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan8742a_priv.h</itemPath>
                 </logicalFolder>
                 <itemPath>../src/config/default/driver/ethphy/src/drv_ethphy_local.h</itemPath>
               </logicalFolder>
               <itemPath>../src/config/default/driver/ethphy/drv_ethphy.h</itemPath>
+              <itemPath>../src/config/default/driver/ethphy/drv_extphy_lan8742a.h</itemPath>
             </logicalFolder>
             <logicalFolder name="gmac" displayName="gmac" projectFiles="true">
               <logicalFolder name="src" displayName="src" projectFiles="true">
@@ -713,7 +714,7 @@
               <logicalFolder name="src" displayName="src" projectFiles="true">
                 <logicalFolder name="dynamic" displayName="dynamic" projectFiles="true">
                   <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_ethphy.c</itemPath>
-                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan867x.c</itemPath>
+                  <itemPath>../src/config/default/driver/ethphy/src/dynamic/drv_extphy_lan8742a.c</itemPath>
                 </logicalFolder>
               </logicalFolder>
             </logicalFolder>
@@ -969,7 +970,6 @@
       <itemPath>../src/main.c</itemPath>
       <itemPath>../src/env.c</itemPath>
       <itemPath>../src/lan865x_diag.c</itemPath>
-      <itemPath>../src/lan867x_diag.c</itemPath>
       <itemPath>../src/port_mirror.c</itemPath>
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>

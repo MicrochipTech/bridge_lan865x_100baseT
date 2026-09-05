@@ -164,10 +164,7 @@ extern "C" {
 #define DRV_MIIM_DRIVER_INDEX_0                 0
 #define DRV_MIIM_INSTANCES_NUMBER           1
 #define DRV_MIIM_INSTANCE_OPERATIONS        4
-/* 3, not the MCC-generated 2: the ETHPHY driver's own client, app.c's boot-banner
-   client, and lan867x_diag.c's eth1_read/eth1_write client all share this MIIM
-   instance. */
-#define DRV_MIIM_INSTANCE_CLIENTS           3
+#define DRV_MIIM_INSTANCE_CLIENTS           2
 #define DRV_MIIM_CLIENT_OP_PROTECTION   false
 #define DRV_MIIM_COMMANDS   false
 #define DRV_MIIM_DRIVER_OBJECT              DRV_MIIM_OBJECT_BASE_Default            
@@ -324,7 +321,9 @@ extern "C" {
 
 /*** telnet Configuration ***/
 #define TCPIP_STACK_USE_TELNET_SERVER
-#define TCPIP_TELNET_MAX_CONNECTIONS    2
+/* 1, not the MCC-generated 2: capped to the one TLS session this board's RAM
+   budget was scoped for (session log) once Telnet went TLS-only below. */
+#define TCPIP_TELNET_MAX_CONNECTIONS    1
 #define TCPIP_TELNET_TASK_TICK_RATE     100
 #define TCPIP_TELNET_SKT_TX_BUFF_SIZE   3200
 #define TCPIP_TELNET_SKT_RX_BUFF_SIZE   0
@@ -453,8 +452,12 @@ extern "C" {
 #define TCPIP_GMAC_SCREEN2_COUNT_QUE        0  
 
 #define TCPIP_GMAC_ETH_OPEN_FLAGS                   \
+                                                        TCPIP_ETH_OPEN_AUTO |\
+                                                        TCPIP_ETH_OPEN_FDUPLEX |\
                                                         TCPIP_ETH_OPEN_HDUPLEX |\
+                                                        TCPIP_ETH_OPEN_100 |\
                                                         TCPIP_ETH_OPEN_10 |\
+                                                        TCPIP_ETH_OPEN_MDIX_AUTO |\
                                                             TCPIP_ETH_OPEN_RMII |\
                                                         0
 
@@ -512,6 +515,17 @@ extern "C" {
 #define NO_WOLFSSL_CLIENT
 #define NO_OLD_TLS
 #define NO_SESSION_CACHE        /* one session at a time - resumption caching buys nothing here */
+/* This board has no RTC and no NTP/SNTP client wired up - confirmed no
+   _gettimeofday/_times syscall (libc_syscalls.c) and no active RTC peripheral
+   (RTC_Handler in the link is only the unused weak startup-code stub). XC32's
+   libc time() still resolves (it's in the link), but returns nothing close to
+   the real date - every certificate's notBefore would look like it is still
+   in the future relative to that, and wolfSSL would reject ANY certificate,
+   including a freshly issued, otherwise-valid one, as "not yet valid".
+   NO_ASN_TIME skips date validation entirely - the honest fix would be a real
+   time source (RTC seeded from build time, or SNTP once the stack is up),
+   out of scope for this experiment. */
+#define NO_ASN_TIME
 // ---------- FUNCTIONAL CONFIGURATION START ----------
 #define WOLFSSL_AES_SMALL_TABLES
 #define NO_MD4
@@ -583,22 +597,16 @@ extern "C" {
 #define TCPIP_STACK_MAC_BRIDGE_DISABLE_GLUE_PORTS false
 
 
-#define DRV_LAN867x_PHY_CONFIG_FLAGS       ( 0 \
+#define DRV_LAN8742A_PHY_CONFIG_FLAGS       ( 0 \
                                                     | DRV_ETHPHY_CFG_RMII \
                                                     )
 
-#define DRV_LAN867x_PHY_LINK_INIT_DELAY            500
-#define DRV_LAN867x_PHY_ADDRESS                    0
-#define DRV_LAN867x_PHY_PERIPHERAL_ID              GMAC_BASE_ADDRESS
-#define DRV_ETHPHY_LAN867x_NEG_INIT_TMO            0
-#define DRV_ETHPHY_LAN867x_NEG_DONE_TMO            0
-#define DRV_ETHPHY_LAN867x_RESET_CLR_TMO           500
-
-#define DRV_ETHPHY_PLCA_ENABLED
-#define DRV_ETHPHY_PLCA_LOCAL_NODE_ID             0
-#define DRV_ETHPHY_PLCA_NODE_COUNT                8
-#define DRV_ETHPHY_PLCA_MAX_BURST_COUNT           0
-#define DRV_ETHPHY_PLCA_BURST_TIMER               128
+#define DRV_LAN8742A_PHY_LINK_INIT_DELAY            500
+#define DRV_LAN8742A_PHY_ADDRESS                    0
+#define DRV_LAN8742A_PHY_PERIPHERAL_ID              GMAC_BASE_ADDRESS
+#define DRV_ETHPHY_LAN8742A_NEG_INIT_TMO            1
+#define DRV_ETHPHY_LAN8742A_NEG_DONE_TMO            2000
+#define DRV_ETHPHY_LAN8742A_RESET_CLR_TMO           500
 
 
 

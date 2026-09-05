@@ -85,7 +85,7 @@
 #include "system/console/src/sys_console_uart_definitions.h"
 #include "library/emulated_eeprom/emulated_eeprom.h"
 #include "driver/ethphy/drv_ethphy.h"
-#include "driver/ethphy/src/dynamic/drv_extphy_lan867x.h"
+#include "driver/ethphy/drv_extphy_lan8742a.h"
 #include "app.h"
 
 

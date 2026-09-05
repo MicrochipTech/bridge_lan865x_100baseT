@@ -37,6 +37,7 @@ from typing import Dict, Optional, List
 import queue
 import time
 import socket
+import ssl
 
 # The network firmware update lives in its own module, deliberately GUI-free, so
 # it can be brought up and debugged from a command line (python scripts\bootload.py
@@ -90,6 +91,26 @@ CONFIG_FILE = Path(__file__).parent.parent / "json" / "bridge_gui_telnet_config.
 # connected" and the confirmation dialogs.
 RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100baseT.hex"
 FLASH_SAME54_SCRIPT = Path(__file__).parent / "flash_same54.py"
+
+# Flash/RAM totals for the "Memory Overview" quick command: build.bat's own
+# scripts/build_summary.py writes this after every local build (xc32-bin2hex's
+# --memorysummary output, see that script). Only reflects the LAST LOCAL BUILD,
+# not necessarily what is actually flashed on the connected board right now -
+# the overview says so explicitly rather than implying it read the device's
+# own flash usage (there is no CLI command for that; meminfo only covers RAM).
+MEMORYFILE_XML = (Path(__file__).parent.parent / "firmware" / "tcpip_iperf_lan865x.X"
+                   / "dist" / "default" / "production" / "memoryfile.xml")
+
+# TLS bring-up (branch t1s-t1s-bridge-lan8670): the firmware's Telnet port now
+# requires a TLS handshake with mutual certificate auth (net_pres_enc_glue.c) -
+# this is this project's own CA/client identity (certs/bridge/, repo root),
+# generated with openssl, NOT wolfSSL's public test certs. See
+# certs/bridge/ca_cert.pem's comment trail / the session log for why: wolfSSL's
+# canned test PKI is both expired and internally mismatched (its "client" cert
+# doesn't even chain to its own "CA" cert).
+TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "ca_cert.pem"
+TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "client_cert.pem"
+TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "bridge" / "client_key.pem"
 # Typed into the erase confirmation dialog, not just clicked - a chip erase is not
 # reversible (wipes firmware AND the emulated EEPROM, both live in the same flash).
 ERASE_CONFIRM_WORD = "ERASE"
@@ -238,6 +259,39 @@ class Screen:
         return "".join(line + "\n" for line in self.lines) + self.cur
 
 
+def _wrap_telnet_tls(sock, host):
+    """Upgrade a freshly connected plain socket to TLS with mutual-cert auth,
+    matching the firmware's net_pres_enc_glue.c (branch t1s-t1s-bridge-lan8670).
+    Raises (ssl.SSLError, FileNotFoundError, ...) on failure - the caller closes
+    the socket and propagates.
+
+    check_hostname is off on purpose: the server cert's CN ("bridge-server",
+    certs/bridge/server_cert.pem) is a fixed name picked at cert-generation
+    time, not the board's IP - there is no DNS/mDNS name here to match against.
+    The server's identity is still verified (CERT_REQUIRED, against our CA),
+    just not by hostname.
+    """
+    for path in (TLS_CA_CERT, TLS_CLIENT_CERT, TLS_CLIENT_KEY):
+        if not path.is_file():
+            raise FileNotFoundError(
+                "missing TLS file: %s (see certs/bridge/ - regenerate with openssl "
+                "if this was never checked out)" % path)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cafile=str(TLS_CA_CERT))
+    ctx.load_cert_chain(certfile=str(TLS_CLIENT_CERT), keyfile=str(TLS_CLIENT_KEY))
+    # Confirmed live against the real board: without this, OpenSSL 3.x aborts
+    # the handshake with "UNSAFE_LEGACY_RENEGOTIATION_DISABLED" - the firmware's
+    # wolfSSL build doesn't send the (RFC 5746) renegotiation_info extension,
+    # which OpenSSL 3.x's default policy otherwise insists on. Not a client bug
+    # to route around blindly - just this embedded TLS stack not implementing an
+    # extension a modern desktop TLS library assumes.
+    ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    sock.settimeout(TELNET_CONNECT_TIMEOUT)
+    return ctx.wrap_socket(sock, server_hostname=host)
+
+
 class TelnetLink:
     """Telnet connection with a reader thread - same interface as the serial
     Link from bridge_gui.py (open()/write()/close(), bytes delivered over the same
@@ -269,6 +323,11 @@ class TelnetLink:
     def open(self):
         sock = socket.create_connection((self.host, self.telnet_port),
                                          timeout=TELNET_CONNECT_TIMEOUT)
+        try:
+            sock = _wrap_telnet_tls(sock, self.host)
+        except Exception:
+            sock.close()
+            raise
         sock.settimeout(0.2)
         self.sock = sock
         try:
@@ -1044,6 +1103,7 @@ class BridgeGUITelnet:
                 ("Sniffer: Disable", lambda: self.run_async_cmd("sniffer 0")),
                 ("Read Stats", lambda: self.run_async_cmd("stats")),
                 ("Memory Info", lambda: self.run_async_cmd("meminfo")),
+                ("Memory Overview", self.memory_overview),
                 ("Build Timestamp", lambda: self.run_async_cmd("timestamp")),
                 ("Reset Device", self.reset_device),
                 ("Flash", self.flash_current_hex),
@@ -1692,6 +1752,83 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
         threading.Thread(target=worker, daemon=True).start()
         self.set_status(f"Running: {command}")
+
+    @staticmethod
+    def _read_local_flash_ram_summary() -> Optional[str]:
+        """Flash/RAM totals from the last local build (MEMORYFILE_XML), formatted
+        as two lines - or None if this machine never built locally (a fresh
+        clone that only ever flashed release\\...hex has no dist\\ output)."""
+        try:
+            xml_text = MEMORYFILE_XML.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return None
+
+        def block(name):
+            m = re.search(
+                r'<memory name="%s">.*?<length>(\d+)</length>\s*'
+                r'<used>(\d+)</used>\s*<free>(\d+)</free>' % name,
+                xml_text, re.DOTALL)
+            return tuple(int(g) for g in m.groups()) if m else None
+
+        program = block("program")
+        data = block("data")
+        if not program or not data:
+            return None
+        length, used, free = program
+        pct = 100.0 * used / length if length else 0.0
+        lines = ["Flash (last local build, not necessarily what's on the board now):",
+                 "  used %d / %d bytes (%.1f%%), %d free" % (used, length, pct, free)]
+        length, used, free = data
+        pct = 100.0 * used / length if length else 0.0
+        lines.append("RAM, static .data+.bss (same build):")
+        lines.append("  used %d / %d bytes (%.1f%%), %d free" % (used, length, pct, free))
+        return "\n".join(lines)
+
+    def memory_overview(self):
+        """Quick Commands > 'Memory Overview': the live device heap (meminfo)
+        plus, if this machine has a local build, that build's Flash/RAM figures
+        - the same two halves as a manual 'meminfo' plus reading build.bat's own
+        summary, just combined into one panel instead of two separate lookups."""
+        if not self.port_link:
+            self.set_error_status("Not connected")
+            messagebox.showwarning("Not connected",
+                                   "Press Connect first, then request the overview.")
+            return
+
+        def worker():
+            raw = self.send_command_via_link("meminfo", timeout_ms=1500)
+            cleaned = self.clean_response("meminfo", raw)
+
+            lines = ["=== Live heap (device, right now) ==="]
+            m = re.search(r"C-runtime heap:\s*total=(\d+)\s+largest free block=(\d+)", cleaned)
+            if m:
+                total, largest = int(m.group(1)), int(m.group(2))
+                lines.append("C-runtime heap (wolfSSL/malloc): %d bytes total, "
+                             "largest free block %d bytes" % (total, largest))
+                lines.append("  (nano-malloc - no exact free total, only the "
+                             "largest single block it could hand out right now)")
+            m = re.search(r"TCP/IP heap:\s*size=(\d+)\s+free=(\d+)\s+maxblock=(\d+)\s+highwater=(\d+)",
+                          cleaned)
+            if m:
+                size, free, maxblock, highwater = (int(g) for g in m.groups())
+                lines.append("TCP/IP heap: %d bytes total, %d free, largest block %d, "
+                             "high-water mark %d" % (size, free, maxblock, highwater))
+            if len(lines) == 1:
+                lines.append(cleaned or "(no response)")
+
+            local = self._read_local_flash_ram_summary()
+            lines.append("")
+            if local:
+                lines.append(local)
+            else:
+                lines.append("(no local build found under dist\\ - Flash/RAM figures need "
+                             "a local build.bat run; meminfo above still reflects the board "
+                             "as it is right now)")
+
+            self.result_queue.put(("cmd_result", True, "\n".join(lines)))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.set_status("Reading memory overview...")
 
     def reset_device(self):
         """Reset the MCU via the Harmony command processor's built-in 'reset' command.
