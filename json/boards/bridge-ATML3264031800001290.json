@@ -1,0 +1,13 @@
+{
+  "board_id": "bridge-ATML3264031800001290",
+  "created": "2026-09-05T15:50:24.464127+00:00",
+  "ip": "192.168.0.31",
+  "probe_serial": "",
+  "fingerprint_sha256": "F1:5F:03:38:D4:49:86:0D:46:45:87:E9:34:F5:20:01:D4:F6:6D:A0:28:C1:0A:0C:26:26:60:0D:CE:64:81:A6",
+  "serial_number": "258ae08aae690338f5098200b05657c44f84a59b",
+  "not_valid_before": "2026-09-05T15:50:24+00:00",
+  "not_valid_after": "2046-08-31T15:50:24+00:00",
+  "cert_pem": "certs\\boards\\bridge-ATML3264031800001290\\server_cert.pem",
+  "key_pem": "certs\\boards\\bridge-ATML3264031800001290\\server_key.pem",
+  "provisioned": false
+}

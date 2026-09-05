@@ -54,9 +54,9 @@ RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100base
 # client identity, same OP_LEGACY_SERVER_CONNECT workaround (confirmed live
 # against real hardware: this embedded wolfSSL build doesn't send the RFC 5746
 # renegotiation_info extension, which OpenSSL 3.x otherwise insists on).
-TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "ca_cert.pem"
-TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "client_cert.pem"
-TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "bridge" / "client_key.pem"
+TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "ca" / "ca_cert.pem"
+TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "client" / "client_cert.pem"
+TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "client" / "client_key.pem"
 
 
 def _wrap_tls(sock, host):

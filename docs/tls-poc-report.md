@@ -104,13 +104,20 @@ Initial bring-up used wolfSSL's own built-in test PKI
    test client would never have passed the server's own mTLS check.
 
 **Fix:** generated a fresh, correctly-chained CA/server/client trio with
-OpenSSL (`certs/bridge/`, RSA-2048, valid 2026-09-05 through 2046-08-31,
-chain verified). Embedded the CA/server cert/server key as DER byte arrays in
+OpenSSL (RSA-2048, valid 2026-09-05 through 2046-08-31, chain verified).
+Embedded the CA/server cert/server key as DER byte arrays in
 `firmware/src/bridge_certs.h`; the client cert/key ship as `.pem` files for
 the Python tooling (§5).
 
-**The CA private key (`certs/bridge/ca_key.pem`) lives in this repo.** Fine
-for this experiment, disqualifying for anything real — see §6.
+**The CA private key (`certs/ca/ca_key.pem`) lives in this repo.** Fine
+for this experiment, disqualifying for anything real — see §6. It was moved
+into its own `certs/ca/` directory (2026-09-05), separate from every leaf
+identity (`certs/client/`'s shared operator identity, `certs/bridge/`'s
+original compiled-in default server identity, `certs/boards/<id>/`'s
+per-board ones) precisely because it is the one file that would need to move
+offline for anything beyond a PoC - keeping it physically apart from every
+leaf identity makes that eventual move a directory move, not a hunt through
+mixed files.
 
 ### 2.5 No RTC — `NO_ASN_TIME`
 
@@ -229,9 +236,9 @@ updated:
   fixed name from cert-generation time, not tied to whatever IP the board
   happens to have; the server's identity is still verified against the CA
   (`CERT_REQUIRED`), just not by hostname/SAN match.
-- Load the project's own CA (`certs/bridge/ca_cert.pem`) to verify the
+- Load the project's own CA (`certs/ca/ca_cert.pem`) to verify the
   server, and present the client identity
-  (`certs/bridge/client_cert.pem`/`client_key.pem`) for the mTLS check.
+  (`certs/client/client_cert.pem`/`client_key.pem`) for the mTLS check.
 - **`ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT`** — found live, not
   anticipated: without it, a modern OpenSSL-3.x-based Python aborts the
   handshake with `UNSAFE_LEGACY_RENEGOTIATION_DISABLED`, because this
@@ -316,7 +323,7 @@ non-preemptive architecture, and not attempted here.
   client cannot obtain a certificate this server accepts.
 
 **What does not:**
-- **The CA private key lives in this repo** (`certs/bridge/ca_key.pem`).
+- **The CA private key lives in this repo** (`certs/ca/ca_key.pem`).
   Whoever has repo access can mint arbitrarily many valid client
   certificates. This is the single biggest reason this stays a PoC.
 - **`NO_ASN_TIME` means certificates never expire, ever**, and there is no
@@ -401,7 +408,233 @@ That trade - SSH's security property, Telnet's protocol simplicity - is
 exactly what made this fit the board's flash/RAM budget where full SSH would
 not have (§4).
 
-## 10. Open items / not done
+## 10. Handshake speed-up: wolfSSL's SP math backend
+
+§7 measured the RSA-2048 handshake at ≈1.6 s of blocked main-loop time, software
+RSA on a Cortex-M4F with no crypto accelerator. wolfSSL ships an alternative
+bignum backend for exactly this: SP ("Single Precision") math with
+hand-written ARM Cortex-M assembly, instead of the general-purpose TFM
+(`USE_FAST_MATH`) implementation this build started with. Enabled via two
+defines in `configuration.h` (`WOLFSSL_HAVE_SP_RSA`,
+`WOLFSSL_SP_ARM_CORTEX_M_ASM`), no protocol or certificate changes.
+
+Measured live, before/after, the same way as §7 (`cpuload`, DWT cycle
+counter, 120 MHz core):
+
+| | on-device spike (`net_pres` slot) | host wall-clock (full login) |
+|---|---|---|
+| Before (TFM) | 197 449 008 cycles ≈ 1.645 s | 3438 ms |
+| After (SP/ASM) | 89 809 477 cycles ≈ 748 ms | ≈1156 ms |
+| Improvement | ≈2.2× | ≈3× |
+
+The wall-clock number includes more than the raw handshake (TCP connect,
+Telnet banner, login/password exchange), which is why it improves by more
+than the on-device cycle count alone - the fixed protocol overhead around
+the handshake stays the same size while the handshake itself shrinks,
+so it dominates the "after" number less. Re-measured on the same board
+(`192.168.0.12`) after re-flashing all three bench boards with this build
+(2026-09-05) - the improvement holds.
+
+This does not remove the architectural problem (§7) - a single handshake
+still blocks the whole cooperative superloop for the better part of a
+second - but it is a real, measured, no-tradeoff improvement: same
+certificates, same protocol, just a faster modular-exponentiation
+implementation.
+
+### 10.1 Two unbounded waits in the TLS glue - both fixed, one nearly missed
+
+Found live, unrelated to the SP-math change itself, in two rounds:
+
+**Round 1 - the close side.** Killing a TLS client mid-session with Ctrl-C
+(no `close_notify` sent) left the server-side `wolfSSL_shutdown()` waiting
+forever for a clean shutdown it will never get (`EncGlue_Close()`'s
+`WOLFSSL_ERROR_WANT_READ`/`WANT_WRITE` branch, `net_pres_enc_glue.c`). With
+`TCPIP_TELNET_MAX_CONNECTIONS = 1`, that one wedged slot made every
+subsequent connection attempt time out at the TLS handshake stage, even
+though the raw TCP connect still succeeded instantly - reproduced live via
+an `openssl s_client` session interrupted with Ctrl-C. **Fixed**: a bounded
+`ENC_CLOSE_TIMEOUT_MS` (5s) - `EncGlue_Close()` now frees the connection
+itself once that passes, close_notify or not.
+
+**Round 2 - the accept side, worse.** Found while stress-testing
+`scripts/discover.py`'s own subnet scan (§11): a client that opens the TCP
+connection and then stalls or abandons the handshake mid-flight leaves
+`EncGlue_Connect()`'s `wolfSSL_accept()` returning WANT_READ/WANT_WRITE
+forever, same as round 1 - except this side had **no timeout at all**, and
+crucially `net_pres.c`'s own pump loop (`NET_PRES_EncTasks`) stops calling
+`fpConnect` the moment status leaves the negotiating family, so a stuck
+connect here does not even get revisited. Confirmed live: raw TCP connect
+kept succeeding, the TLS handshake timed out on every login attempt
+indefinitely, recovering only on a physical reset - reproducible just by
+running `discover.py`'s scan a few times in a row.
+
+Fixing this one took an extra pass: the obvious fix - free the connection
+directly on timeout, mirroring round 1 - would have been a **use-after-free
+/ double-free**. `NET_PRES_SocketClose()` calls `fpClose()` unconditionally
+for any encrypted socket, and telnet.c's own session loop only notices a
+dead connection via `NET_PRES_SocketWasReset()`/`WasDisconnected()` -
+transport-level checks, blind to the encryption layer's status - which,
+once true, route through `NET_PRES_SocketDisconnect()` and *that* calls
+`fpClose()` too. Freeing early would have raced that second call landing on
+an already-freed pointer. **Fixed correctly** instead: on timeout,
+`EncGlue_Connect()` calls the transport's own `fpDisconnect()` and returns
+`NET_PRES_ENC_SS_FAILED` without freeing anything - that's what makes
+`WasDisconnected()` true on telnet.c's next pass, driving the *existing*,
+already-correct cleanup path through `NET_PRES_SocketDisconnect()` into a
+proper `fpClose()` call. `ENC_CONNECT_TIMEOUT_MS` (15s) gives a slow but
+genuine client real margin over the ~1.2s a normal handshake takes.
+Re-stress-tested after the fix: four scans back to back, no board needed a
+reset (one took ~8s to answer instead of ~1.2s - consistent with the new
+bound actually firing - but none stayed stuck).
+
+The same gap - "any other wolfSSL error" (bad/rejected client cert,
+protocol error), not just a timeout - existed before either fix and got the
+same treatment, since it was never distinguished from the timeout case
+inside `EncGlue_Connect()`.
+
+A real deployment would still want `TCPIP_TELNET_MAX_CONNECTIONS > 1` on
+top of both fixes, so one slow/hostile client can't monopolize the only
+slot for the full timeout window while a legitimate one waits.
+
+### 10.2 Operational note: board IP addresses moved on their own
+
+Unrelated to any of the above, but worth recording since it caused real
+confusion while debugging it: board `...1049` changed from `192.168.0.12`
+to `192.168.0.11` at some point during this session's many resets (SWD and
+software), confirmed by directly comparing the TLS certificate served at
+each address against the known fingerprint. Not a scanner bug, not a
+bridging artifact (both were seriously considered and ruled out) - just a
+DHCP lease without a per-MAC reservation on this bench's network handing
+out a different address across reboots. Worth a static reservation (or a
+fixed IP on the boards themselves) if address stability matters for
+anything beyond this kind of interactive session.
+
+## 11. A small PKI: per-board identities and remote provisioning
+
+Everything in §2-§9 used one shared server identity, compiled into every
+board's firmware alike (`bridge_certs.h`). That does not scale past a single
+bench unit: with more than one board on a network, they are
+indistinguishable at the TLS layer, and there is no way to revoke or rotate
+one board's identity without reflashing it. This section adds - and, unlike
+the rest of this report's original scope, *lives entirely outside the
+firmware image itself* except for the small remote-provisioning receiver -
+a way to give each board its own certificate/key pair, tracked as a small
+local PKI on the operator's machine.
+
+**`scripts/pki.py`** - a standalone, GUI-free module (same philosophy as
+`bootload.py`): a self-signed project CA (`certs/ca/ca_{cert,key}.pem`,
+reused from §2), a shared operator client identity, and
+`issue_board_identity(board_id, ip=...)`, which generates a fresh RSA-2048
+keypair, signs a leaf certificate against the CA, and writes
+`certs/boards/<board_id>/server_{cert,key}.{pem,der}` plus a
+`json/boards/<board_id>.json` record (fingerprint, serial, validity window,
+IP, PEM/DER paths, a `provisioned` flag) - one JSON file per board, so a
+fleet of boards is just a directory listing.
+
+**`firmware/src/cert_provision.c`/`.h`** - the on-device receiver. Adds a
+`cert` command group (`cert_arm`, `cert_show`, `cert_save`, `cert_reset`,
+`cert_abort`) alongside a small binary data port (5568, same
+TLS+mTLS-encrypted-socket pattern as `bootload.c`'s data port 5567, for the
+same reason: an 80-byte Telnet line buffer cannot carry a ~1 KB certificate
+as hex text). A staged, in-RAM `cert_store_t` is armed with one item
+(`server_cert` / `server_key` / `ca_cert`) at a time, filled over the data
+port, CRC32-checked, and only written to the emulated EEPROM on an explicit
+`cert_save` - `cert_reset` reverts to the compiled-in default. Mirrors
+`bootload.c`'s existing "arm, transfer, verify, explicit commit, needs a
+`reset` to actually take effect" shape throughout, deliberately, so the two
+subsystems read as one design rather than two.
+
+**`scripts/cert_provision.py`** - the client side, reusing `bootload.py`'s
+already-TLS-wrapped `Console` class rather than duplicating login/framing
+logic. `push_board(ip, board_id)` sends a board's `server_cert`+`server_key`
+from `pki.py`'s output, then `cert_save`; a device `reset` is still a
+separate, explicit step (same "verify then commit then reboot" caution as
+bootload's own image swap).
+
+**`scripts/discover.py`** - finds boards on the local network segment, so
+the operator doesn't need to already know an IP to start with. A plain TCP
+connect + mutual-TLS handshake against port 23 across the local /24 (our CA,
+our shared client identity) - not mDNS: a responder would need a new
+Harmony component in every board's firmware (flash is already at 66% of
+budget, §3.1) and a fleet reflash, for a bench of a handful of boards where
+a plain scan takes a few seconds. Every completed handshake is matched
+against `pki.py`'s known fingerprints to show a `board_id` where one is
+known, `(unregistered)` otherwise. See §10.1 for the real bug this scan's
+own load surfaced in the TLS glue, and §10.2 for a board-address mixup this
+same testing turned up (unrelated to the scanner itself).
+
+**The "Certificates" tab** (`bridge_gui_telnet.py`, between Terminal and
+Help) ties all of it together: a "Discovered on network" panel
+(`discover.py`, a "Scan Network" button, click a result to load its IP into
+the fields above) above a "Known boards" panel read from `pki.py`'s
+`json/boards/*.json`, CA status, "Issue New Board Identity" (calls
+`pki.issue_board_identity()`, defaulting the suggested id from the IP field
+above), and against whatever device is configured in the IP/user/password
+fields - "Show Device's Active Identity" (`cert_show`), "Push Selected
+Board Identity to Device", and "Reset Device to Compiled-In Default".
+Background-thread + result-queue plumbing matches every other long-running
+action already in that file.
+
+### 11.1 Three bugs found live, same rigor as §6
+
+Getting `push_board()` to actually work end-to-end on real hardware
+surfaced three separate, real bugs - none visible from reading the code
+alone:
+
+1. **A stale "reset" flag aborted every transfer before it read a byte.**
+   `bootload.c`'s own `BL_WAIT_CONN` state has a one-line fix,
+   `(void)NET_PRES_SocketWasReset(s_sock);`, right where it transitions to
+   receiving - "as iperf.c/testserver.c do", per its comment. The stack
+   sets that flag as a side effect of accept/handshake itself, not only on
+   a genuine reset. `cert_provision.c`'s analogous `CP_WAIT_CONN` transition
+   was missing that exact call: the TLS+mTLS handshake completed
+   successfully on *both* sides (confirmed independently on the Python
+   client), but `CP_RECV`'s very first `NET_PRES_SocketWasReset()` check
+   then saw the stale flag and aborted ("connection lost") before a single
+   byte of the certificate was read. Fixed by copying the same clear-on-
+   transition line into `cert_provision.c`.
+2. **The completion report collided with the next command, on the same
+   connection.** `cp_report()` originally wrote a transfer's result to both
+   the data socket *and* the console (`CMD_PRINT_OR_CONSOLE`), matching
+   `bl_fail()`'s pattern. But `TCPIP_TELNET_MAX_CONNECTIONS` is 1, and
+   `push_board()` runs `cert_arm`+transfer for `server_cert`, then again for
+   `server_key`, all on *one* Telnet connection - the console echo landed
+   in that same stream just before the next command's own reply, and
+   `Console.command()`'s "one line per command" assumption (documented in
+   `bootload.py`) misread it as the reply to arming `server_key`. Fixed by
+   dropping the console echo entirely: with only one possible connection,
+   there is no "other observer" to echo to.
+3. **The cert store didn't fit the emulated EEPROM at all.** The original
+   `CERT_MAX_DER = 1536` (three slots, "generous for an RSA-2048 cert or
+   key DER") sized `cert_store_t` at 4632 bytes, and `CERT_EE_OFFSET =
+   4096` - but the emulated EEPROM's *entire* usable capacity is
+   `EEPROM_EMULATOR_NUM_LOGICAL_PAGES (8) × EEPROM_EMULATOR_PAGE_DATA_SIZE
+   (508) = 4064 bytes total`, itself sized to exactly fit
+   `bootload.c`'s `BL_ENV_SIZE` (16 KiB = 2 flash blocks), the fixed
+   "environment window" at the top of every bank that a firmware image can
+   never touch (WP3) and that a bank swap shadow-copies intact. Both the
+   struct and the offset were already past the valid range - every
+   `cert_save` failed with "EEPROM write failed". The real certs/keys in
+   use are 879-1192 bytes; **enlarging the 16 KiB window was considered and
+   rejected** (it would mean growing `BL_ENV_SIZE`/`BL_MAX_IMAGE`
+   consistently across both banks and touching the already-hardened
+   bootloader/swap logic - real risk for no need). Fixed instead by
+   shrinking `CERT_MAX_DER` to 1280 (real margin over the observed max) and
+   moving `CERT_EE_OFFSET` to 128 (just past `env.c`'s 72-byte record) -
+   `3*1280+24 = 3864` bytes, comfortably inside the 4064-byte window.
+
+### 11.2 Live end-to-end verification
+
+After all three fixes: `pki.py issue-board bridge-ATML3264031800001049
+--ip 192.168.0.12` → `cert_provision.py --push-board
+bridge-ATML3264031800001049` → `cert_save` → device `reset` → a fresh TLS
+handshake against the board serves a certificate whose SHA-256
+(`64f906cf...`) matches the pushed board identity's own DER file exactly,
+confirmed by independently hashing both. Repeated cleanly from a fresh
+flash (the EEPROM-held identity survives a firmware reflash, as expected -
+it lives outside the app image's flash region entirely).
+
+## 12. Open items / not done
 
 - Nothing in this report is committed to git. The branch's working tree has
   the LAN867x/eth1 experiment reverted (back to LAN8742A/LAN8740A) and the
@@ -420,3 +653,14 @@ not have (§4).
   certificate lifetimes mean something, a way to revoke or replace a
   compromised client certificate short of replacing the CA, a non-default
   Telnet password, and a resolution to the §7 blocking-handshake problem.
+- §11's PKI is still bench-grade in the same ways §8/§2.4 already flagged:
+  board private keys are generated on the *operator's* machine and shipped
+  over the wire (never generated on-device), there is still no revocation
+  for a compromised board identity (same `NO_ASN_TIME` caveat as §2.5/§8),
+  and `push_board()` needs the one available Telnet connection for its
+  whole sequence - it cannot run while anyone else is connected, and a
+  connection drop mid-sequence leaves the board part-armed (recoverable
+  with `cert_abort`/`cert_reset`, but not automatic).
+- The "Certificates" tab (§11) was, like the rest of `bridge_gui_telnet.py`,
+  exercised through its underlying `pki.py`/`cert_provision.py` calls and
+  `py_compile`, not by clicking through the actual Tk window.

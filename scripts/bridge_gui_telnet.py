@@ -45,6 +45,9 @@ import ssl
 # progress callback and a window. Same directory as this script, which Python puts
 # on sys.path for the script it runs, so a plain import is enough.
 import bootload
+import pki
+import cert_provision
+import discover
 
 try:
     import serial
@@ -103,14 +106,16 @@ MEMORYFILE_XML = (Path(__file__).parent.parent / "firmware" / "tcpip_iperf_lan86
 
 # TLS bring-up (branch t1s-t1s-bridge-lan8670): the firmware's Telnet port now
 # requires a TLS handshake with mutual certificate auth (net_pres_enc_glue.c) -
-# this is this project's own CA/client identity (certs/bridge/, repo root),
-# generated with openssl, NOT wolfSSL's public test certs. See
-# certs/bridge/ca_cert.pem's comment trail / the session log for why: wolfSSL's
-# canned test PKI is both expired and internally mismatched (its "client" cert
-# doesn't even chain to its own "CA" cert).
-TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "ca_cert.pem"
-TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "bridge" / "client_cert.pem"
-TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "bridge" / "client_key.pem"
+# this is this project's own CA/client identity (certs/ca/ + certs/bridge/,
+# repo root), generated with openssl, NOT wolfSSL's public test certs. See
+# pki.py's module docstring for why the CA lives in its own directory
+# (certs/ca/, separate from any leaf identity) and the session log for why a
+# project CA exists at all: wolfSSL's canned test PKI is both expired and
+# internally mismatched (its "client" cert doesn't even chain to its own "CA"
+# cert).
+TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "ca" / "ca_cert.pem"
+TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "client" / "client_cert.pem"
+TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "client" / "client_key.pem"
 # Typed into the erase confirmation dialog, not just clicked - a chip erase is not
 # reversible (wipes firmware AND the emulated EEPROM, both live in the same flash).
 ERASE_CONFIRM_WORD = "ERASE"
@@ -967,6 +972,7 @@ class BridgeGUITelnet:
         self.create_registers_tab()
         self.create_testmodes_tab()
         self.create_terminal_tab()
+        self.create_certificates_tab()
         self.create_about_tab()
 
         # Sofortiger Startwert, falls aus irgendeinem Grund kein <<NotebookTabChanged>>
@@ -1595,6 +1601,273 @@ class BridgeGUITelnet:
                     self.disconnect_device()
         except queue.Empty:
             pass
+
+    def create_certificates_tab(self):
+        """'Certificates' tab: the project's small PKI (scripts/pki.py) plus
+        remote provisioning (scripts/cert_provision.py) in one place - list
+        every board this workstation has issued an identity for, issue new
+        ones, and push one onto the currently-configured device (ip_var/
+        telnet_user_var/telnet_password_var, same fields Connect uses).
+
+        Deliberately thin: all the actual cert/key/EEPROM logic lives in
+        pki.py and cert_provision.py (both standalone, importable, tested
+        from a plain Python shell first - see docs/tls-poc-report.md) so
+        this tab is just Tk plumbing around them, not where any of that
+        logic actually lives.
+        """
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Certificates")
+
+        paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # LEFT: two stacked sections - what's actually out there on the wire
+        # right now (discover.py, a plain TCP+mTLS subnet scan - see its
+        # module docstring for why not mDNS), and what we've issued a PKI
+        # identity for (json/boards/*.json) - two different questions, since
+        # a board can be reachable without an identity yet, or have an
+        # identity but be powered off/unreachable right now.
+        left_paned = ttk.PanedWindow(paned, orient=tk.VERTICAL)
+        paned.add(left_paned, weight=2)
+
+        discover_frame = ttk.LabelFrame(left_paned, text="Discovered on network (port 23, our CA)", padding=5)
+        left_paned.add(discover_frame, weight=1)
+
+        self.cert_scan_button = ttk.Button(discover_frame, text="Scan Network", command=self.cert_scan_network)
+        self.cert_scan_button.pack(fill=tk.X, pady=(0, 4))
+
+        discover_columns = ("ip", "board_id", "fingerprint")
+        self.discover_tree = ttk.Treeview(discover_frame, columns=discover_columns, show="headings", height=6)
+        for col, width in (("ip", 110), ("board_id", 210), ("fingerprint", 140)):
+            self.discover_tree.heading(col, text=col)
+            self.discover_tree.column(col, width=width, stretch=(col == "fingerprint"))
+        self.discover_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        discover_scroll = ttk.Scrollbar(discover_frame, orient=tk.VERTICAL, command=self.discover_tree.yview)
+        discover_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.discover_tree.config(yscrollcommand=discover_scroll.set)
+        self.discover_tree.bind("<<TreeviewSelect>>", self.cert_on_discovered_select)
+
+        known_frame = ttk.LabelFrame(left_paned, text="Known boards (json/boards/*.json)", padding=5)
+        left_paned.add(known_frame, weight=1)
+
+        columns = ("board_id", "ip", "fingerprint", "created")
+        self.cert_tree = ttk.Treeview(known_frame, columns=columns, show="headings", height=8)
+        for col, width in (("board_id", 200), ("ip", 110), ("fingerprint", 140), ("created", 140)):
+            self.cert_tree.heading(col, text=col)
+            self.cert_tree.column(col, width=width, stretch=(col == "fingerprint"))
+        self.cert_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        tree_scroll = ttk.Scrollbar(known_frame, orient=tk.VERTICAL, command=self.cert_tree.yview)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cert_tree.config(yscrollcommand=tree_scroll.set)
+
+        # RIGHT: actions + log
+        right = ttk.Frame(paned)
+        paned.add(right, weight=1)
+
+        ca_frame = ttk.LabelFrame(right, text="Certificate Authority", padding=5)
+        ca_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Button(ca_frame, text="CA Status", command=self.cert_ca_status).pack(fill=tk.X)
+
+        board_frame = ttk.LabelFrame(right, text="Board identities", padding=5)
+        board_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Button(board_frame, text="Refresh List", command=self.cert_refresh_boards).pack(fill=tk.X, pady=1)
+        ttk.Button(board_frame, text="Issue New Board Identity...",
+                  command=self.cert_issue_board_dialog).pack(fill=tk.X, pady=1)
+        ttk.Button(board_frame, text="Open certs/boards/<id> folder",
+                  command=self.cert_open_selected_folder).pack(fill=tk.X, pady=1)
+
+        device_frame = ttk.LabelFrame(right, text="Selected device (ip/user/password above)", padding=5)
+        device_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Button(device_frame, text="Show Device's Active Identity",
+                  command=self.cert_show_device).pack(fill=tk.X, pady=1)
+        ttk.Button(device_frame, text="Push Selected Board Identity to Device",
+                  command=self.cert_push_selected).pack(fill=tk.X, pady=1)
+        ttk.Button(device_frame, text="Reset Device to Compiled-In Default Identity",
+                  command=self.cert_reset_device).pack(fill=tk.X, pady=1)
+
+        log_frame = ttk.LabelFrame(right, text="Log", padding=5)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        self.cert_output = tk.Text(log_frame, height=14, width=44, state=tk.DISABLED, wrap=tk.WORD)
+        self.cert_output.pack(fill=tk.BOTH, expand=True)
+        cert_scroll = ttk.Scrollbar(self.cert_output)
+        cert_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cert_output.config(yscrollcommand=cert_scroll.set)
+
+        self.cert_refresh_boards()
+
+    def _cert_log(self, text: str):
+        self.cert_output.config(state=tk.NORMAL)
+        self.cert_output.insert(tk.END, text.rstrip("\n") + "\n")
+        self.cert_output.see(tk.END)
+        self.cert_output.config(state=tk.DISABLED)
+
+    def cert_refresh_boards(self):
+        self.cert_tree.delete(*self.cert_tree.get_children())
+        for b in pki.list_boards():
+            self.cert_tree.insert("", tk.END, iid=b["board_id"], values=(
+                b["board_id"], b.get("ip", ""), b["fingerprint_sha256"][:23] + "...",
+                b.get("created", "")[:19]))
+        self._cert_log("%d known board identit%s" %
+                       (len(pki.list_boards()), "y" if len(pki.list_boards()) == 1 else "ies"))
+
+    def cert_scan_network(self):
+        base_ip = self.ip_var.get().strip()
+        if not base_ip:
+            messagebox.showinfo("No base IP", "Enter any IP on the target /24 in the IP field above first.")
+            return
+        self.discover_tree.delete(*self.discover_tree.get_children())
+        self.cert_scan_button.config(state=tk.DISABLED, text="Scanning...")
+        self._cert_log("Scanning %s.0/24 (port 23, our CA)..." % ".".join(base_ip.split(".")[:3]))
+
+        def worker():
+            try:
+                by_fp = {b["fingerprint_sha256"].replace(":", "").lower(): b["board_id"]
+                        for b in pki.list_boards()}
+                results = discover.scan_subnet(base_ip)
+                rows = []
+                for r in results:
+                    fp = r["fingerprint_sha256"]
+                    fp_display = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
+                    board_id = by_fp.get(fp, "(unregistered)")
+                    rows.append((r["ip"], board_id, fp_display))
+                self.result_queue.put(("discover_results", rows))
+            except Exception as e:
+                self.result_queue.put(("cert_log", "Scan failed: %s" % e))
+                self.result_queue.put(("discover_results", []))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def cert_on_discovered_select(self, event=None):
+        sel = self.discover_tree.selection()
+        if not sel:
+            return
+        ip, board_id, _fp = self.discover_tree.item(sel[0], "values")
+        self.ip_var.set(ip)
+        if board_id != "(unregistered)" and self.cert_tree.exists(board_id):
+            self.cert_tree.selection_set(board_id)
+            self.cert_tree.see(board_id)
+
+    def cert_ca_status(self):
+        try:
+            if pki.ca_exists():
+                cert, _ = pki.load_ca()
+                self._cert_log("CA present: %s" % pki.CA_CERT_PATH)
+                self._cert_log("  subject: %s" % cert.subject.rfc4514_string())
+                self._cert_log("  fingerprint: %s" % pki.fingerprint(cert))
+            else:
+                if messagebox.askyesno("No CA yet",
+                        "No project CA exists yet (%s).\nCreate one now?" % pki.CA_CERT_PATH):
+                    pki.create_ca()
+                    pki.issue_client_identity()
+                    self._cert_log("Created a new CA and the shared client identity.")
+        except pki.PkiError as e:
+            messagebox.showerror("PKI error", str(e))
+
+    def cert_issue_board_dialog(self):
+        if not pki.ca_exists():
+            messagebox.showwarning("No CA", "Create the CA first (Certificate Authority > CA Status).")
+            return
+        suggested_id = "bridge-" + self.ip_var.get().strip().replace(".", "-")
+        board_id = simpledialog.askstring(
+            "Issue board identity", "Board id (short, filesystem-safe - e.g. a probe serial):",
+            parent=self.root, initialvalue=suggested_id)
+        if not board_id:
+            return
+        ip = simpledialog.askstring("Issue board identity", "Board IP (optional):",
+                                    parent=self.root, initialvalue=self.ip_var.get().strip())
+        try:
+            info = pki.issue_board_identity(board_id, ip=ip or "")
+            self._cert_log("Issued identity for '%s': %s" % (board_id, info["fingerprint_sha256"]))
+            self.cert_refresh_boards()
+        except pki.PkiError as e:
+            messagebox.showerror("PKI error", str(e))
+
+    def cert_open_selected_folder(self):
+        sel = self.cert_tree.selection()
+        if not sel:
+            messagebox.showinfo("No selection", "Select a board in the list first.")
+            return
+        path = pki.BOARDS_CERT_DIR / sel[0]
+        if not path.is_dir():
+            messagebox.showerror("Not found", str(path))
+            return
+        os.startfile(str(path))  # noqa: this GUI is Windows-only (sv-ttk Windows 11 theme)
+
+    def _cert_selected_board_id(self):
+        sel = self.cert_tree.selection()
+        if not sel:
+            messagebox.showinfo("No selection", "Select a board in the list first.")
+            return None
+        return sel[0]
+
+    def cert_show_device(self):
+        host = self.ip_var.get().strip()
+        user = self.telnet_user_var.get()
+        password = self.telnet_password_var.get()
+
+        def worker():
+            try:
+                c = bootload.Console(host, user, password)
+                c.open()
+                try:
+                    reply = c.command("cert_show", markers=(b"CERT: ",))
+                finally:
+                    c.close()
+                self.result_queue.put(("cert_log", reply))
+            except Exception as e:
+                self.result_queue.put(("cert_log", "ERROR: %s" % e))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._cert_log("Reading %s's active identity..." % host)
+
+    def cert_push_selected(self):
+        board_id = self._cert_selected_board_id()
+        if board_id is None:
+            return
+        host = self.ip_var.get().strip()
+        user = self.telnet_user_var.get()
+        password = self.telnet_password_var.get()
+        if not messagebox.askyesno(
+                "Push identity?",
+                "Push board '%s's server certificate+key to %s and save it?\n\n"
+                "The device keeps using its CURRENT identity for existing "
+                "connections; a 'reset' (Quick Commands > Reset Device) is still "
+                "needed afterwards to actually switch to the new one." % (board_id, host)):
+            return
+
+        def worker():
+            try:
+                cert_provision.push_board(host, board_id, user, password, log=lambda s: self.result_queue.put(("cert_log", s)))
+                self.result_queue.put(("cert_log", "Done - device still needs a reset to use it."))
+            except Exception as e:
+                self.result_queue.put(("cert_log", "ERROR: %s" % e))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._cert_log("Pushing '%s' to %s..." % (board_id, host))
+
+    def cert_reset_device(self):
+        host = self.ip_var.get().strip()
+        user = self.telnet_user_var.get()
+        password = self.telnet_password_var.get()
+        if not messagebox.askyesno("Reset identity?",
+                "Revert %s's TLS identity to the compiled-in default? "
+                "A device 'reset' is still needed afterwards." % host):
+            return
+
+        def worker():
+            try:
+                c = bootload.Console(host, user, password)
+                c.open()
+                try:
+                    reply = c.command("cert_reset", markers=(b"CERT: ",))
+                finally:
+                    c.close()
+                self.result_queue.put(("cert_log", reply))
+            except Exception as e:
+                self.result_queue.put(("cert_log", "ERROR: %s" % e))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._cert_log("Resetting %s's identity..." % host)
 
     def create_about_tab(self):
         """Create About/Help tab"""
@@ -2321,6 +2594,20 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     else:
                         self.set_error_status(f"Error: {output}")
                         messagebox.showerror("Error", f"Command failed:\n{output}")
+
+                elif result[0] == "cert_log":
+                    _, text = result
+                    if hasattr(self, 'cert_output'):
+                        self._cert_log(text)
+
+                elif result[0] == "discover_results":
+                    _, rows = result
+                    self.discover_tree.delete(*self.discover_tree.get_children())
+                    for ip, board_id, fp_display in rows:
+                        self.discover_tree.insert("", tk.END, values=(ip, board_id, fp_display))
+                    self.cert_scan_button.config(state=tk.NORMAL, text="Scan Network")
+                    self._cert_log("Scan done: %d board%s found" %
+                                   (len(rows), "" if len(rows) == 1 else "s"))
 
                 elif result[0] == "op_line":
                     # One line right away, not collected until the end - that is the

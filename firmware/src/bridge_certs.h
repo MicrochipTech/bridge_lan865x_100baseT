@@ -1,10 +1,10 @@
 /* Generated bring-up TLS identity for this project (branch t1s-t1s-bridge-lan8670).
    NOT wolfSSL's public test certs - a project-specific CA/server/client trio,
-   openssl-generated, valid 2026-09-05..2046-08-31 (see certs/bridge/ for the
-   source .pem files and how to regenerate). Still bring-up material: the CA
-   private key (certs/bridge/ca_key.pem) lives in this repo, which a real
-   deployment must never do - whoever holds it can mint a client cert this
-   server will accept. */
+   openssl-generated, valid 2026-09-05..2046-08-31 (see certs/bridge/ and
+   certs/ca/ for the source .pem files and how to regenerate). Still bring-up
+   material: the CA private key (certs/ca/ca_key.pem) lives in this repo,
+   which a real deployment must never do - whoever holds it can mint a client
+   cert this server will accept. */
 #ifndef BRIDGE_CERTS_H
 #define BRIDGE_CERTS_H
 

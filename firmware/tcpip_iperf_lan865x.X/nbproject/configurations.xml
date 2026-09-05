@@ -970,6 +970,7 @@
       <itemPath>../src/main.c</itemPath>
       <itemPath>../src/env.c</itemPath>
       <itemPath>../src/lan865x_diag.c</itemPath>
+      <itemPath>../src/cert_provision.c</itemPath>
       <itemPath>../src/port_mirror.c</itemPath>
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>

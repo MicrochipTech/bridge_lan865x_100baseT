@@ -526,6 +526,16 @@ extern "C" {
    time source (RTC seeded from build time, or SNTP once the stack is up),
    out of scope for this experiment. */
 #define NO_ASN_TIME
+/* RSA-2048 sign/verify measured at ~1.6s (cpuload, live handshake) using
+   USE_FAST_MATH's generic TFM bignum path - the whole single-threaded
+   superloop blocks for that long. WOLFSSL_HAVE_SP_RSA switches just the RSA
+   operations (not the whole math backend - USE_FAST_MATH/TFM stays for
+   everything else) to wolfSSL's hand-written Cortex-M assembly bignum
+   routines (sp_cortexm.c, already vendored, previously dead code with
+   neither macro set); WOLFSSL_SP_ARM_CORTEX_M_ASM selects that ASM path
+   specifically over the generic-C fallback inside the same file. */
+#define WOLFSSL_HAVE_SP_RSA
+#define WOLFSSL_SP_ARM_CORTEX_M_ASM
 // ---------- FUNCTIONAL CONFIGURATION START ----------
 #define WOLFSSL_AES_SMALL_TABLES
 #define NO_MD4
