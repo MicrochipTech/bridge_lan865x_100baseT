@@ -599,9 +599,10 @@
                              displayName="APPLICATION LAYER"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/components/tcpipIperf.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/components/tcpipZeroConf.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/components/tcpipTelnet.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/components/tcpipDns.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/components/tcpipIperf.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/APPLICATION LAYER/APPLICATION LAYER.yml</itemPath>
               </logicalFolder>
@@ -609,8 +610,8 @@
                              displayName="BASIC CONFIGURATION"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipStack.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipCmd.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/components/tcpipStack.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/BASIC CONFIGURATION/BASIC CONFIGURATION.yml</itemPath>
               </logicalFolder>
@@ -618,12 +619,12 @@
                              displayName="DATA LINK LAYER"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtMacLan865x.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/tcpipNetConfig.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvGmac.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvMiim.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/sercom0.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtPhyLan8742a.yml</itemPath>
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/tcpipNetConfig.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/sercom0.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drvExtMacLan865x.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/components/drv_spi.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/DATA LINK LAYER/DATA LINK LAYER.yml</itemPath>
@@ -650,8 +651,8 @@
                              displayName="TRANSPORT LAYER"
                              projectFiles="true">
                 <logicalFolder name="components" displayName="components" projectFiles="true">
-                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/TRANSPORT LAYER/components/tcpipTcp.yml</itemPath>
                   <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/TRANSPORT LAYER/components/tcpipUdp.yml</itemPath>
+                  <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/TRANSPORT LAYER/components/tcpipTcp.yml</itemPath>
                 </logicalFolder>
                 <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/components/TRANSPORT LAYER/TRANSPORT LAYER.yml</itemPath>
               </logicalFolder>
@@ -659,25 +660,25 @@
             <itemPath>tcpip_iperf_lan865x_default/components/TCP_forwardSlash_IP STACK/TCP_forwardSlash_IP STACK.yml</itemPath>
           </logicalFolder>
           <itemPath>tcpip_iperf_lan865x_default/components/lib_wolfcrypt.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_console.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_command.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_debug.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/lib_emulated_eeprom.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/tc0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/core.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/drvExtMacLan865x_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_1.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/cmsis.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_command.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/HarmonyCore.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/sercom1.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/nvmctrl.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/evsys.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/drv_spi_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_console.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/sys_time.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/lib_crypto.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/dfp.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/evsys.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_time.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_1.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/nvmctrl.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/tcpipNetConfig_0.yml</itemPath>
+          <itemPath>tcpip_iperf_lan865x_default/components/core.yml</itemPath>
           <itemPath>tcpip_iperf_lan865x_default/components/sys_console_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/drvExtMacLan865x_0.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/sys_debug.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/cmsis.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/lib_emulated_eeprom.yml</itemPath>
-          <itemPath>tcpip_iperf_lan865x_default/components/drv_spi_0.yml</itemPath>
         </logicalFolder>
         <itemPath>tcpip_iperf_lan865x_default/mcc-config.mc4</itemPath>
       </logicalFolder>
@@ -778,6 +779,9 @@
                 <itemPath>../src/config/default/library/tcpip/src/udp.c</itemPath>
                 <itemPath>../src/config/default/library/tcpip/src/tcpip_mac_bridge.c</itemPath>
                 <itemPath>../src/config/default/library/tcpip/src/telnet.c</itemPath>
+                <itemPath>../src/config/default/library/tcpip/src/zero_conf_helper.c</itemPath>
+                <itemPath>../src/config/default/library/tcpip/src/zero_conf_link_local.c</itemPath>
+                <itemPath>../src/config/default/library/tcpip/src/zero_conf_multicast_dns.c</itemPath>
               </logicalFolder>
             </logicalFolder>
           </logicalFolder>
@@ -988,7 +992,7 @@
         <targetDevice>ATSAME54P20A</targetDevice>
         <targetHeader></targetHeader>
         <targetPluginBoard></targetPluginBoard>
-        <platformTool>EdbgTool</platformTool>
+        <platformTool>noID</platformTool>
         <languageToolchain>XC32</languageToolchain>
         <languageToolchainVersion>5.10</languageToolchainVersion>
         <platform>3</platform>
@@ -1107,7 +1111,6 @@
         <property key="additional-options-use-response-files" value="false"/>
         <property key="additional-options-write-sla" value="false"/>
         <property key="allocate-dinit" value="false"/>
-        <property key="appendMe" value=""/>
         <property key="code-dinit" value="false"/>
         <property key="ebase-addr" value=""/>
         <property key="enable-check-sections" value="false"/>
@@ -1237,8 +1240,6 @@
         <property key="memories.programmemory" value="true"/>
         <property key="memories.programmemory.ranges" value="0-fffff"/>
         <property key="poweroptions.powerenable" value="false"/>
-        <property key="programmerToGoFilePath"
-                  value="D:/SVN/net_10Base_t1s_mc4/apps/tcpip_iperf_lan865x/firmware/tcpip_iperf_lan865x.X/debug/default/tcpip_iperf_lan865x_ptg"/>
         <property key="programoptions.eraseb4program" value="true"/>
         <property key="programoptions.preservedataflash" value="false"/>
         <property key="programoptions.preservedataflash.ranges"
@@ -1259,6 +1260,7 @@
         <property key="toolpack.updateoptions.packversion"
                   value="Press to select which tool pack to use"/>
         <property key="voltagevalue" value=""/>
+        <property key="x.erase.clearprot" value="true"/>
       </EdbgTool>
       <Tool>
         <property key="AutoSelectMemRanges" value="auto"/>

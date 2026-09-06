@@ -1,0 +1,49 @@
+configVersion: 1.0.0
+componentName: tcpipZeroConf
+coreVersion: 5.8.4
+device: ATSAME54P20A
+library: []
+dependency:
+- dependencyPackage: class com.microchip.mcc.harmony.HarmonyModule
+  name: tcpipZeroConf
+  type: module
+  version: ''
+- dependencyPackage: ''
+  name: net
+  type: package
+  version: v3.14.5
+customDataClassName: com.microchip.utils_mh3.utils.persistence.CustomModuleData
+data:
+  attachments: {}
+  elementPosition: {}
+  symbols:
+    TCPIP_ZC_MDNS_HEAP_SIZE:
+      attributes:
+        id: TCPIP_ZC_MDNS_HEAP_SIZE
+      children:
+      - children:
+        - attributes:
+            id: tcpipZeroConf
+            value: '1664'
+          type: Dynamic
+        type: Values
+      type: Integer
+    TCPIP_USE_MULTI_CAST_DNS_ZERO_CONFIG:
+      attributes:
+        id: TCPIP_USE_MULTI_CAST_DNS_ZERO_CONFIG
+      children:
+      - children:
+        - attributes:
+            id: visible
+          children:
+          - type: Value
+            value: 'true'
+          type: Boolean
+        type: Attributes
+      - children:
+        - attributes:
+            value: 'true'
+          type: User
+        type: Values
+      type: Boolean
+  userData: {}

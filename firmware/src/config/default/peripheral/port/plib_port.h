@@ -65,6 +65,24 @@
 // *****************************************************************************
 // *****************************************************************************
 
+/*** Macros for BUTTON1 pin ***/
+#define BUTTON1_Set()               (PORT_REGS->GROUP[3].PORT_OUTSET = ((uint32_t)1U << 0U))
+#define BUTTON1_Clear()             (PORT_REGS->GROUP[3].PORT_OUTCLR = ((uint32_t)1U << 0U))
+#define BUTTON1_Toggle()            (PORT_REGS->GROUP[3].PORT_OUTTGL = ((uint32_t)1U << 0U))
+#define BUTTON1_OutputEnable()      (PORT_REGS->GROUP[3].PORT_DIRSET = ((uint32_t)1U << 0U))
+#define BUTTON1_InputEnable()       (PORT_REGS->GROUP[3].PORT_DIRCLR = ((uint32_t)1U << 0U))
+#define BUTTON1_Get()               (((PORT_REGS->GROUP[3].PORT_IN >> 0U)) & 0x01U)
+#define BUTTON1_PIN                  PORT_PIN_PD00
+
+/*** Macros for BUTTON2 pin ***/
+#define BUTTON2_Set()               (PORT_REGS->GROUP[3].PORT_OUTSET = ((uint32_t)1U << 1U))
+#define BUTTON2_Clear()             (PORT_REGS->GROUP[3].PORT_OUTCLR = ((uint32_t)1U << 1U))
+#define BUTTON2_Toggle()            (PORT_REGS->GROUP[3].PORT_OUTTGL = ((uint32_t)1U << 1U))
+#define BUTTON2_OutputEnable()      (PORT_REGS->GROUP[3].PORT_DIRSET = ((uint32_t)1U << 1U))
+#define BUTTON2_InputEnable()       (PORT_REGS->GROUP[3].PORT_DIRCLR = ((uint32_t)1U << 1U))
+#define BUTTON2_Get()               (((PORT_REGS->GROUP[3].PORT_IN >> 1U)) & 0x01U)
+#define BUTTON2_PIN                  PORT_PIN_PD01
+
 /*** Macros for LAN865x_INT pin ***/
 #define LAN865x_INT_Set()               (PORT_REGS->GROUP[2].PORT_OUTSET = ((uint32_t)1U << 14U))
 #define LAN865x_INT_Clear()             (PORT_REGS->GROUP[2].PORT_OUTCLR = ((uint32_t)1U << 14U))
@@ -83,6 +101,15 @@
 #define LAN865x_CS_Get()               (((PORT_REGS->GROUP[2].PORT_IN >> 15U)) & 0x01U)
 #define LAN865x_CS_PIN                  PORT_PIN_PC15
 
+/*** Macros for LED2 pin ***/
+#define LED2_Set()               (PORT_REGS->GROUP[0].PORT_OUTSET = ((uint32_t)1U << 16U))
+#define LED2_Clear()             (PORT_REGS->GROUP[0].PORT_OUTCLR = ((uint32_t)1U << 16U))
+#define LED2_Toggle()            (PORT_REGS->GROUP[0].PORT_OUTTGL = ((uint32_t)1U << 16U))
+#define LED2_OutputEnable()      (PORT_REGS->GROUP[0].PORT_DIRSET = ((uint32_t)1U << 16U))
+#define LED2_InputEnable()       (PORT_REGS->GROUP[0].PORT_DIRCLR = ((uint32_t)1U << 16U))
+#define LED2_Get()               (((PORT_REGS->GROUP[0].PORT_IN >> 16U)) & 0x01U)
+#define LED2_PIN                  PORT_PIN_PA16
+
 /*** Macros for LAN865x_RESET pin ***/
 #define LAN865x_RESET_Set()               (PORT_REGS->GROUP[2].PORT_OUTSET = ((uint32_t)1U << 18U))
 #define LAN865x_RESET_Clear()             (PORT_REGS->GROUP[2].PORT_OUTCLR = ((uint32_t)1U << 18U))
@@ -91,6 +118,15 @@
 #define LAN865x_RESET_InputEnable()       (PORT_REGS->GROUP[2].PORT_DIRCLR = ((uint32_t)1U << 18U))
 #define LAN865x_RESET_Get()               (((PORT_REGS->GROUP[2].PORT_IN >> 18U)) & 0x01U)
 #define LAN865x_RESET_PIN                  PORT_PIN_PC18
+
+/*** Macros for LED1 pin ***/
+#define LED1_Set()               (PORT_REGS->GROUP[2].PORT_OUTSET = ((uint32_t)1U << 21U))
+#define LED1_Clear()             (PORT_REGS->GROUP[2].PORT_OUTCLR = ((uint32_t)1U << 21U))
+#define LED1_Toggle()            (PORT_REGS->GROUP[2].PORT_OUTTGL = ((uint32_t)1U << 21U))
+#define LED1_OutputEnable()      (PORT_REGS->GROUP[2].PORT_DIRSET = ((uint32_t)1U << 21U))
+#define LED1_InputEnable()       (PORT_REGS->GROUP[2].PORT_DIRCLR = ((uint32_t)1U << 21U))
+#define LED1_Get()               (((PORT_REGS->GROUP[2].PORT_IN >> 21U)) & 0x01U)
+#define LED1_PIN                  PORT_PIN_PC21
 
 /*** Macros for LAN865x_MOSI pin ***/
 #define LAN865x_MOSI_Get()               (((PORT_REGS->GROUP[1].PORT_IN >> 24U)) & 0x01U)

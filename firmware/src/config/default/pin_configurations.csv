@@ -9,8 +9,8 @@ Pin Number,Pin ID,Custom Name,Function,Mode, Direction,Latch,Pull Up,Pull Down,D
 10,PA03,,Available,,,,,,NORMAL
 11,PB04,,Available,,,,,,NORMAL
 12,PB05,,Available,,,,,,NORMAL
-13,PD00,,Available,,,,,,NORMAL
-16,PD01,,Available,,,,,,NORMAL
+13,PD00,BUTTON1,GPIO,Digital,In,n/a,Yes,No,NORMAL
+16,PD01,BUTTON2,GPIO,Digital,In,n/a,Yes,No,NORMAL
 17,PB06,,Available,,,,,,NORMAL
 18,PB07,,Available,,,,,,NORMAL
 19,PB08,,Available,,,,,,NORMAL
@@ -48,7 +48,7 @@ Pin Number,Pin ID,Custom Name,Function,Mode, Direction,Latch,Pull Up,Pull Down,D
 61,PA13,,GMAC_GRX0,Digital,High Impedance,n/a,No,No,NORMAL
 62,PA14,,GMAC_GTXCK,Digital,High Impedance,n/a,No,No,NORMAL
 63,PA15,,GMAC_GRXER,Digital,High Impedance,n/a,No,No,NORMAL
-66,PA16,,Available,,,,,,NORMAL
+66,PA16,LED2,GPIO,Digital,Out,High,,,NORMAL
 67,PA17,,GMAC_GTXEN,Digital,High Impedance,n/a,No,No,NORMAL
 68,PA18,,GMAC_GTX0,Digital,High Impedance,n/a,No,No,NORMAL
 69,PA19,,GMAC_GTX1,Digital,High Impedance,n/a,No,No,NORMAL
@@ -57,7 +57,7 @@ Pin Number,Pin ID,Custom Name,Function,Mode, Direction,Latch,Pull Up,Pull Down,D
 72,PC18,LAN865x_RESET,GPIO,Digital,Out,High,,,NORMAL
 73,PC19,,Available,,,,,,NORMAL
 74,PC20,,GMAC_GRXDV,Digital,High Impedance,n/a,No,No,NORMAL
-75,PC21,,Available,,,,,,NORMAL
+75,PC21,LED1,GPIO,Digital,Out,High,,,NORMAL
 76,PC22,,GMAC_GMDC,Digital,High Impedance,n/a,No,No,NORMAL
 77,PC23,,GMAC_GMDIO,Digital,High Impedance,n/a,No,No,NORMAL
 80,PD20,,Available,,,,,,NORMAL

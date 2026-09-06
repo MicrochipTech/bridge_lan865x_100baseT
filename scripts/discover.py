@@ -27,6 +27,85 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+# *****************************************************************************
+# Broadcast discovery (firmware/src/app.c, Discovery_Tasks()) - a tiny custom
+# plaintext UDP protocol, not mDNS. mDNS-SD was tried and dropped (2026-09-06,
+# see configuration.h's HAND-PATCH note on TCPIP_STACK_USE_ZEROCONF_MDNS_SD):
+# Microchip's own query parser asserted on essentially every incoming query
+# and never actually answered one. This is near-instant (one broadcast round
+# trip, well under a second) versus scan_subnet()'s several-second TLS sweep
+# below, and deliberately carries no trust of its own - a board answers with
+# just its MAC+IP, nothing encrypted or authenticated. That is the whole
+# point: it has to work before the querier and the board share any TLS
+# identity. Everything after discovery (reading status, provisioning a new
+# certificate) goes over the existing mutual-TLS Telnet console exactly as
+# before - see cert_provision.py.
+DISCOVERY_UDP_PORT = 30303
+DISCOVERY_QUERY_MAGIC = b"BRDQ"
+DISCOVERY_REPLY_MAGIC = b"BRDR"
+DISCOVERY_REPLY_LEN = 15   # magic(4) + version(1) + mac(6) + ipv4(4)
+
+
+def _local_ip_for(target_ip: str) -> str:
+    """Which local NIC's IP the OS routing table would use to reach target_ip -
+    the standard connect()-a-UDP-socket-and-read-it-back trick (no packet is
+    actually sent; UDP connect() just does the route lookup). Needed because
+    a directed broadcast sent without binding the sending socket to the
+    matching NIC silently goes out the WRONG interface on a multi-homed
+    Windows PC and nothing is ever seen back - confirmed live (2026-09-06),
+    same lesson as the mDNS-SD post-mortem's multicast tests."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((target_ip, 1))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
+def _directed_broadcast(base_ip: str) -> str:
+    """192.168.0.12 -> '192.168.0.255' - same /24-only assumption as
+    _subnet_from_base_ip below. A directed broadcast (not 255.255.255.255)
+    so this reaches the right subnet even from a multi-homed Windows PC,
+    same lesson as the mDNS multicast tests during mDNS-SD's post-mortem:
+    binding/targeting the wrong interface silently sees nothing."""
+    parts = base_ip.strip().split(".")
+    if len(parts) != 4:
+        raise ValueError("not an IPv4 address: %r" % base_ip)
+    return ".".join(parts[:3]) + ".255"
+
+
+def broadcast_discover(base_ip: str, timeout: float = 1.0, port: int = DISCOVERY_UDP_PORT):
+    """Broadcast one discovery query on base_ip's /24 and collect replies for
+    `timeout` seconds. Returns a list of {"ip", "mac"} dicts, sorted by IP -
+    same shape of use as scan_subnet() but no fingerprint (no TLS happens
+    here at all) and typically returns well under a second instead of
+    several. ip comes from the reply's own source address (always correct);
+    the MAC in the payload identifies which of the board's two interfaces
+    (eth0/T1S or eth1/100BASE-TX - this board bridges both) actually
+    answered."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.bind((_local_ip_for(base_ip), 0))
+    sock.settimeout(0.2)
+    found = {}
+    try:
+        sock.sendto(DISCOVERY_QUERY_MAGIC, (_directed_broadcast(base_ip), port))
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(64)
+            except socket.timeout:
+                continue
+            if len(data) < DISCOVERY_REPLY_LEN or data[:4] != DISCOVERY_REPLY_MAGIC:
+                continue   # not our protocol - some other broadcast chatter on this port
+            mac = ":".join("%02X" % b for b in data[5:11])
+            found[addr[0]] = {"ip": addr[0], "mac": mac}
+    finally:
+        sock.close()
+    return sorted(found.values(), key=lambda r: tuple(int(x) for x in r["ip"].split(".")))
+
+
 TELNET_PORT = 23
 TCP_TIMEOUT = 0.3
 # A lone handshake against a real board takes ~1.15-1.2s (measured live,
@@ -139,14 +218,24 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base-ip", required=True, help="any IP in the /24 to scan, e.g. 192.168.0.12")
+    ap.add_argument("--broadcast", action="store_true",
+                    help="use the fast UDP broadcast protocol instead of the TLS subnet scan "
+                         "(no fingerprint - just IP+MAC, see broadcast_discover())")
     args = ap.parse_args()
 
-    def _progress(done, total):
-        print("\rscanning... %d/%d" % (done, total), end="", flush=True)
+    if args.broadcast:
+        results = broadcast_discover(args.base_ip)
+        if not results:
+            print("no boards found")
+        for r in results:
+            print("%-15s  %s" % (r["ip"], r["mac"]))
+    else:
+        def _progress(done, total):
+            print("\rscanning... %d/%d" % (done, total), end="", flush=True)
 
-    results = scan_subnet(args.base_ip, progress=_progress)
-    print()
-    if not results:
-        print("no boards found")
-    for r in results:
-        print("%-15s  %s" % (r["ip"], r["fingerprint_sha256"]))
+        results = scan_subnet(args.base_ip, progress=_progress)
+        print()
+        if not results:
+            print("no boards found")
+        for r in results:
+            print("%-15s  %s" % (r["ip"], r["fingerprint_sha256"]))

@@ -2524,4 +2524,130 @@ completed step — do not wait until the end of the session.
 
 ---
 
+## 2026-09-06
+
+### MCC ZeroConf/mDNS-SD tried for board discovery, found buggy, dropped for a custom UDP broadcast protocol
+
+- Goal for the session: boards discoverable on the LAN without the operator
+  typing an IP - "das ziel soll sein das die boards per zeroconf alle
+  erkannt werden können". Added mDNS/Zeroconf via MCC's GUI (Generate Code
+  twice - once for ZCLL/Link-Local, once adding mDNS-SD/Bonjour), while also
+  wiring LED1/LED2 (PC21/PA16) and BUTTON1/2 (PD00/PD01) to MCC's pin
+  configurator (schematic source: `SAM E54 Curiosity Ultra_R3_Design_
+  Documentation.PDF`) and switching `leds.c` from raw `PORT_REGS` access to
+  the generated `LED1_Set()`/`LED1_Clear()` macros now that MCC owns the pin.
+- **Every Generate Code silently reverted prior hand-patches** (confirmed
+  twice): `.pProvObject_ss` back to NULL (kills TLS), `WOLFCRYPT_ONLY`
+  reinstated, `TCPIP_TELNET_MAX_CONNECTIONS` 1->2, and the whole
+  `ENV_Init()`/PLCA/MAC-string block in `initialization.c` gone. Full
+  `git diff` review + manual re-patch became mandatory after every
+  regenerate, not a targeted grep (the first pass missed the `ENV_Init()`
+  regression entirely).
+- **Bug 1 - PC22/GMAC_GMDC pin-mux collision:** assigning PC21 as LED1
+  (MCC) made MCC also drop PC22's peripheral-function assignment
+  (`PORT_PINCFG[22]`) and corrupt `PORT_PMUX[11]` (0xbb -> 0xb0) - PC21 and
+  PC22 share that PMUX byte. Broke MDIO to the LAN8742A
+  (`DRV_PHY operation error`, `eth1: NOT AVAILABLE`) on every board with the
+  PHY populated. Fixed by hand in `plib_port.c`, re-applied after every
+  regenerate.
+- **Bug 2 - NULL module config = real crash:** MCC wired
+  `{TCPIP_MODULE_ZCLL, 0}` / `{TCPIP_MODULE_MDNS, 0}` in
+  `TCPIP_STACK_MODULE_CONFIG_TBL`. A NULL configData crashed inside
+  `TCPIP_UDP_Initialize()` (`stackCtrl->memH == NULL`) with a genuine ARM
+  BusFault - confirmed via this project's own `faultlog` + `xc32-addr2line`
+  resolving the LR into `udp.c:700`. Fixed by declaring a real (placeholder)
+  `tcpipZCLLInitData`/`tcpipMDNSInitData` and pointing the table at them.
+- **Bug 3 - `ROM_LENGTH` reset on every Generate Code AND every MPLAB X
+  build:** `configurations.xml`'s `preprocessor-macros` under `<C32-LD>`
+  flips from the project's `0x7c000` (dual-bank) back to Harmony's stock
+  `0xfc000`. Needs re-patching in both `configurations.xml` and
+  `Makefile-default.mk` (the latter not auto-synced by plain `make`) after
+  every regenerate/IDE build - not something a one-time Project Properties
+  edit survives.
+- **Bug 4 - mDNS decompression parser essentially non-functional:**
+  `M_MDNS_DECOMP_DEPTH=4` (Microchip's own default) exhausted almost
+  immediately under ordinary ambient mDNS chatter from other LAN devices,
+  spamming `TCPIP Stack Assert` from `F_Decomp_Push`/`F_mDNSDeCompress`
+  (non-fatal - `TCPIPStack_Assert()` just logs and returns). Raising it to
+  16 only delayed the exhaustion - a hand-crafted, completely uncompressed
+  36-byte query still triggered the same assert, proving it is not a depth
+  problem but a parser defect that fires on essentially any incoming query.
+- **Bug 5 (own bug, fixed) - `TCPIP_MDNS_ServiceRegister()` never actually
+  registered anything:** MCC's Generate Code only wires the module's
+  init/task hooks - the application has to call `TCPIP_MDNS_ServiceRegister()`
+  itself, which nothing did. Once added (`app.c`), it still failed outright
+  because `txt_record=NULL` hits the function's own
+  `if (txt_record == NULL) return MDNSD_ERR_INVAL;` before even touching the
+  interface - fixed by passing `""` instead of NULL.
+- **With bugs 2 and 5 fixed, the board did genuinely announce itself** -
+  boot log showed `NOT_READY -> INIT -> PROBE -> ANNOUNCE -> DEFEND` and
+  `ZeroConf: Service = bridge._telnet._tcp.local`, and a live multicast
+  capture on `224.0.0.251:5353` caught real PROBE (74B) and ANNOUNCE (105B)
+  packets from the board. But bug 4 meant it could not reliably answer an
+  active query - only its own boot-time self-announce ever reliably reached
+  the wire.
+- **Decision (user):** not worth chasing bug 4 further into Microchip's own
+  parser - "ich glaube das das mit dem mdsn-sd mehr ärger macht als das es
+  etwas nutzt" (more trouble than it's worth). Dropped entirely:
+  `TCPIP_STACK_USE_ZEROCONF_MDNS_SD` commented out in `configuration.h`
+  (HAND-PATCH, drops the whole `zero_conf_multicast_dns.c` body via its own
+  `#if defined(...) && defined(...)` guard - confirmed via `xc32-size`, the
+  object file went to 0/0/0 text/data/bss), the `tcpipMDNSInitData`
+  table entry removed from `initialization.c`, and the registration
+  call/callback removed from `app.c`. Saved ~6.6 KB flash. The MCC-side
+  checkbox itself is still ticked - user will uncheck it and regenerate
+  separately later; this HAND-PATCH is a stopgap until then, not the final
+  state.
+  - mDNS-SD's incremental footprint while it was in, for reference:
+    ~6.2 KB flash (`zero_conf_multicast_dns.o` text) + ~356 B static RAM
+    (`.bss`, the decompression pool) + 1568 B TCPIP-heap RAM (784 B
+    `sizeof(DNSDesc_t)` x2 interfaces, confirmed via `xc32-objdump`
+    disassembly of `TCPIP_MDNS_Initialize`'s `TCPIP_HEAP_Calloc` call site).
+- **Replacement, implemented and verified working: a small custom plaintext
+  UDP broadcast protocol**, per the user's own design (broadcast query in
+  the clear, board replies with just MAC+IP in the clear, everything else -
+  status, provisioning - stays on the existing mutual-TLS Telnet console
+  exactly as before; boards keep using their compiled-in default identity
+  until the PC's existing cert_provision.py flow issues and pushes new
+  ones - that whole push/save/reset mechanism already existed, untouched).
+  - Firmware (`app.c`, no new project files needed - MPLAB X's generated
+    Makefiles list source files explicitly, adding a new one needs the IDE):
+    `Discovery_Tasks()`, a raw `TCPIP_UDP_ServerOpen(IP_ADDRESS_TYPE_IPV4,
+    30303, NULL)` server socket polled from `APP_STATE_IDLE`. 4-byte magic
+    request (`"BRDQ"`) in, 15-byte reply out (`"BRDR"` + version + 6-byte
+    MAC + 4-byte IPv4 of whichever interface the query arrived on, via
+    `TCPIP_UDP_SocketInfoGet(...).hNet`) - unrecognized traffic on the port
+    is silently dropped, not asserted on.
+  - Client (`scripts/discover.py`, `broadcast_discover()`): sends the query
+    to the target /24's directed broadcast (`x.x.x.255`, not
+    `255.255.255.255`) and collects replies for ~1s. **First attempt found
+    nothing** even though a direct unicast query to a board worked fine -
+    same root cause as the mDNS multicast tests' earlier lesson: the
+    sending socket must be bound to the correct local NIC on a multi-homed
+    Windows PC, or the broadcast silently goes out the wrong interface.
+    Fixed generally (not by hardcoding an IP) with the "connect a UDP
+    socket, read back `getsockname()`" trick to resolve the right local IP
+    for a given target subnet before binding.
+  - GUI (`bridge_gui_telnet.py`, Certificates tab): added a "Broadcast
+    Discover (fast)" button alongside the existing "TLS Scan (slow,
+    verifies CA)" one (renamed from "Scan Network"); the discover tree
+    gained a `mac` column (blank for TLS-scan rows, blank `fingerprint` for
+    broadcast rows - the two methods answer different questions: reachable
+    IP+MAC as raw fact, vs. "IP is confirmed to trust our CA").
+  - Verified live against all three bench boards: unicast reply parses
+    correctly (`BRDR` + version 1 + MAC + IP), the fixed broadcast finds all
+    three in well under a second, `faultlog` stayed clean throughout, and a
+    TLS/Telnet login still completed normally (~1.1s) after each rebuild.
+  - Known minor inaccuracy, not fixed (low impact): querying a board's eth0
+    (T1S) address directly by unicast gets a reply whose *payload* MAC/IP
+    still describes eth1, even though the reply's real transport-level
+    source address is correctly eth0's own IP. Does not affect the actual
+    discovery use case (the Python client keys off the reply's real source
+    address, not the payload's embedded IP) - only the displayed MAC could
+    be wrong in that specific direct-unicast-to-eth0 scenario, which normal
+    broadcast-based discovery from a PC on the ordinary Ethernet side does
+    not hit.
+
+---
+
 <!-- Append new dated entries above this line as work continues. -->

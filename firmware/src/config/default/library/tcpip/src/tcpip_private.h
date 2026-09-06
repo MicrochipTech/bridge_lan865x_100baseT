@@ -136,6 +136,7 @@ void TCPIPStack_Condition(bool cond, const char* fileName, const char* funcName,
 #include "tcpip/src/tcpip_commands_manager.h"
 #include "tcpip/src/telnet_manager.h"
 #include "tcpip/src/udp_manager.h"
+#include "tcpip/src/zero_conf_manager.h"
 #include "tcpip/src/iperf_manager.h"
 #include "tcpip/src/tcpip_mac_bridge_manager.h"
 #include "tcpip/src/tcpip_packet.h"

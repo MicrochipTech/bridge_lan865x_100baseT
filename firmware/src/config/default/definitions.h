@@ -80,7 +80,6 @@
 #include "net_pres/pres/net_pres_encryptionproviderapi.h"
 #include "net_pres/pres/net_pres_transportapi.h"
 #include "net_pres/pres/net_pres_socketapi.h"
-#include "net_pres/pres/net_pres_enc_glue.h"
 #include "system/console/sys_console.h"
 #include "system/console/src/sys_console_uart_definitions.h"
 #include "library/emulated_eeprom/emulated_eeprom.h"

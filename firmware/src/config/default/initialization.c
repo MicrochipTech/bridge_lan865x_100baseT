@@ -291,6 +291,11 @@ const TCPIP_ICMP_MODULE_CONFIG tcpipICMPInitData =
 
 
 
+/*** Zeroconfig initialization data ***/
+const ZCLL_MODULE_CONFIG tcpipZCLLInitData =
+{
+    0
+};
 
 
 
@@ -421,6 +426,10 @@ const TCPIP_STACK_MODULE_CONFIG TCPIP_STACK_MODULE_CONFIG_TBL [] =
     {TCPIP_MODULE_DNS_CLIENT,       &tcpipDNSClientInitData},       // TCPIP_MODULE_DNS_CLIENT
 
     {TCPIP_MODULE_TELNET_SERVER,    &tcpipTelnetInitData},          // TCPIP_MODULE_TELNET_SERVER
+    {TCPIP_MODULE_ZCLL,             &tcpipZCLLInitData},            // TCPIP_MODULE_ZCLL,
+    /* mDNS-SD dropped - see the HAND-PATCH note on TCPIP_STACK_USE_ZEROCONF_MDNS_SD
+       in configuration.h. TCPIP_MODULE_MDNS itself is compiled out with it, so
+       this table entry would just point at a module that no longer exists. */
     {TCPIP_MODULE_COMMAND,          0},                             // TCPIP_MODULE_COMMAND,
     {TCPIP_MODULE_IPERF,            0},                             // TCPIP_MODULE_IPERF,
     { TCPIP_MODULE_MANAGER,         &tcpipHeapConfig },             // TCPIP_MODULE_MANAGER
@@ -642,16 +651,16 @@ static const NET_PRES_INIT_DATA netPresInitData =
  
 
 /*** LAN8742A PHY Driver Time-Out Initialization Data ***/
-DRV_ETHPHY_TMO drvlan8742aTmo =
+DRV_ETHPHY_TMO drvlan8742aTmo = 
 {
     .resetTmo = DRV_ETHPHY_LAN8742A_RESET_CLR_TMO,
     .aNegDoneTmo = DRV_ETHPHY_LAN8742A_NEG_DONE_TMO,
-    .aNegInitTmo = DRV_ETHPHY_LAN8742A_NEG_INIT_TMO,
+    .aNegInitTmo = DRV_ETHPHY_LAN8742A_NEG_INIT_TMO,    
 };
 
 /*** ETH PHY Initialization Data ***/
 const DRV_ETHPHY_INIT tcpipPhyInitData_LAN8742A =
-{
+{    
     .ethphyId               = DRV_LAN8742A_PHY_PERIPHERAL_ID,
     .phyAddress             = DRV_LAN8742A_PHY_ADDRESS,
     .phyFlags               = DRV_LAN8742A_PHY_CONFIG_FLAGS,

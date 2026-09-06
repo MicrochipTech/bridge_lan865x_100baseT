@@ -123,6 +123,81 @@ bool TelnetAuthenticationHandler(const char* user, const char* password, const T
 
 const void* TelnetHandlerParam;
 
+/* =========================================================
+ * Board discovery: plaintext UDP broadcast
+ * =========================================================
+ * Replaces the mDNS-SD attempt (see docs/session-log.md, 2026-09-06) - that
+ * component's own query parser asserted on essentially every incoming query
+ * (not just unusual compression) and never actually answered one, and was
+ * dropped instead of chased further (see the HAND-PATCH note on
+ * TCPIP_STACK_USE_ZEROCONF_MDNS_SD in configuration.h).
+ *
+ * Deliberately tiny and custom instead: the PC-side tool (scripts/discover.py,
+ * broadcast_discover()) sends a 4-byte magic to the subnet's directed
+ * broadcast address on DISCOVERY_UDP_PORT; any board listening replies once,
+ * unicast, with its own MAC+IP. That is ALL this protocol carries - nothing
+ * here is authenticated or trusted, which is the point: it has to work
+ * before the querier and the board share any TLS identity yet. Everything
+ * that follows discovery (reading status, provisioning a new certificate)
+ * goes over the existing mutual-TLS Telnet console exactly as before -
+ * see cert_provision.c/.py. */
+#define DISCOVERY_UDP_PORT          30303u
+static const uint8_t DISCOVERY_QUERY_MAGIC[4] = { 'B', 'R', 'D', 'Q' };
+static const uint8_t DISCOVERY_REPLY_MAGIC[4] = { 'B', 'R', 'D', 'R' };
+#define DISCOVERY_REPLY_VERSION     1u
+
+static UDP_SOCKET s_discoverySocket = INVALID_UDP_SOCKET;
+
+static void Discovery_Tasks(void)
+{
+    uint16_t avail;
+    uint8_t  req[sizeof(DISCOVERY_QUERY_MAGIC)];
+    UDP_SOCKET_INFO info;
+    const uint8_t *mac;
+    uint32_t ip;
+    uint8_t  reply[4u + 1u + 6u + 4u];   /* magic + version + MAC + IPv4 */
+
+    if (s_discoverySocket == INVALID_UDP_SOCKET) {
+        return;
+    }
+    avail = TCPIP_UDP_GetIsReady(s_discoverySocket);
+    if (avail < sizeof(req)) {
+        return;
+    }
+    (void)TCPIP_UDP_ArrayGet(s_discoverySocket, req, (uint16_t)sizeof(req));
+    if (avail > sizeof(req)) {
+        /* Discard the rest of this datagram - not ours, or padding we don't
+           care about; either way it must not bleed into the next Get(). */
+        (void)TCPIP_UDP_ArrayGet(s_discoverySocket, NULL, (uint16_t)(avail - sizeof(req)));
+    }
+    if (memcmp(req, DISCOVERY_QUERY_MAGIC, sizeof(DISCOVERY_QUERY_MAGIC)) != 0) {
+        return;   /* some other broadcast traffic on this port - ignore */
+    }
+
+    /* hNet identifies whichever interface the query actually arrived on
+       (this board bridges eth0/T1S and eth1/100BASE-TX, so either is
+       possible) - report THAT interface's own MAC/IP, not a fixed one, so
+       the reply is always reachable by whoever just asked. */
+    if (!TCPIP_UDP_SocketInfoGet(s_discoverySocket, &info)) {
+        return;
+    }
+    mac = TCPIP_STACK_NetAddressMac(info.hNet);
+    ip  = TCPIP_STACK_NetAddress(info.hNet);
+    if (mac == NULL) {
+        return;
+    }
+
+    memcpy(&reply[0], DISCOVERY_REPLY_MAGIC, sizeof(DISCOVERY_REPLY_MAGIC));
+    reply[4] = (uint8_t)DISCOVERY_REPLY_VERSION;
+    memcpy(&reply[5], mac, 6u);
+    memcpy(&reply[11], &ip, 4u);
+
+    if (TCPIP_UDP_PutIsReady(s_discoverySocket) >= sizeof(reply)) {
+        (void)TCPIP_UDP_ArrayPut(s_discoverySocket, reply, (uint16_t)sizeof(reply));
+        (void)TCPIP_UDP_Flush(s_discoverySocket);
+    }
+}
+
 // *****************************************************************************
 // *****************************************************************************
 // Section: Application Local Functions
@@ -1112,6 +1187,10 @@ void APP_Tasks ( void )
                 TCPIP_TELNET_HANDLE telnetAuthHandle = TCPIP_TELNET_AuthenticationRegister(TelnetAuthenticationHandler, &TelnetHandlerParam);
                 SYS_CONSOLE_PRINT("Telnet auth handler registration: %s\n\r", (telnetAuthHandle != NULL) ? "OK" : "FAILED (slot already taken)");
             }
+            s_discoverySocket = TCPIP_UDP_ServerOpen(IP_ADDRESS_TYPE_IPV4, (UDP_PORT)DISCOVERY_UDP_PORT, NULL);
+            SYS_CONSOLE_PRINT("Discovery UDP server: %s (port %u)\n\r",
+                              (s_discoverySocket != INVALID_UDP_SOCKET) ? "OK" : "FAILED",
+                              (unsigned)DISCOVERY_UDP_PORT);
             appData.state = APP_STATE_IDLE;
             break;
         }
@@ -1137,6 +1216,11 @@ void APP_Tasks ( void )
              * the readback LAN865X_DIAG_Tasks() just produced, so it has to run
              * after it. See the SNIFFER_TXD_* block in port_mirror.c. */
             MIRROR_Tasks();
+
+            /* Plaintext UDP broadcast discovery responder - see its own
+               comment above (near DISCOVERY_UDP_PORT) for why this replaced
+               the mDNS-SD attempt. */
+            Discovery_Tasks();
 
             /* TCP echo test server - see testserver.c */
             TESTSERVER_Tasks();

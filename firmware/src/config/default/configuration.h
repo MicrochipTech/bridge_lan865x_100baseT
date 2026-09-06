@@ -244,6 +244,54 @@ extern "C" {
 
 
 
+#define TCPIP_STACK_USE_ZEROCONF_LINK_LOCAL
+#define TCPIP_ZC_LL_PROBE_WAIT 1
+#define TCPIP_ZC_LL_PROBE_MIN 1
+#define TCPIP_ZC_LL_PROBE_MAX 2
+#define TCPIP_ZC_LL_PROBE_NUM 3
+#define TCPIP_ZC_LL_ANNOUNCE_WAIT 2
+#define TCPIP_ZC_LL_ANNOUNCE_NUM 2
+#define TCPIP_ZC_LL_ANNOUNCE_INTERVAL 2
+#define TCPIP_ZC_LL_MAX_CONFLICTS 10
+#define TCPIP_ZC_LL_RATE_LIMIT_INTERVAL 60
+#define TCPIP_ZC_LL_DEFEND_INTERVAL 10
+#define TCPIP_ZC_LL_IPV4_LLBASE 0xa9fe0100
+#define TCPIP_ZC_LL_IPV4_LLBASE_MASK 0xffff
+#define TCPIP_ZC_LL_TASK_TICK_RATE 113
+/* HAND-PATCH to MCC-generated code (CLAUDE.md section 3): mDNS-SD dropped
+   (2026-09-06) - its own decompression parser asserts on essentially every
+   incoming query (confirmed live, not just deep/unusual compression chains -
+   a trivial hand-crafted uncompressed query triggered it too), and it never
+   answers a directed query as a result; only its own boot-time self-announce
+   ever reaches the wire. Board discovery is being replaced with a small
+   custom plaintext UDP broadcast protocol instead - see discover.py/app.c.
+   Undefining this alone drops the whole zero_conf_multicast_dns.c body (see
+   its own `#if defined(TCPIP_STACK_USE_ZEROCONF_LINK_LOCAL) &&
+   defined(TCPIP_STACK_USE_ZEROCONF_MDNS_SD)` guard) so nothing is left for
+   the linker to pull in. This is a stopgap: the real removal is unchecking
+   "Use Multicast DNS Zero Config (Bonjour)" in MCC and regenerating - do
+   that instead of re-adding this define back.
+#define TCPIP_STACK_USE_ZEROCONF_MDNS_SD */
+#define TCPIP_ZC_MDNS_TASK_TICK_RATE 63
+#define TCPIP_ZC_MDNS_PORT 5353
+#define TCPIP_ZC_MDNS_MAX_HOST_NAME_SIZE 32
+#define TCPIP_ZC_MDNS_MAX_LABEL_SIZE 64
+#define TCPIP_ZC_MDNS_MAX_RR_NAME_SIZE 256
+#define TCPIP_ZC_MDNS_MAX_SRV_TYPE_SIZE 32
+#define TCPIP_ZC_MDNS_MAX_SRV_NAME_SIZE 64
+#define TCPIP_ZC_MDNS_MAX_TXT_DATA_SIZE 128
+#define TCPIP_ZC_MDNS_RESOURCE_RECORD_TTL_VAL 3600
+#define TCPIP_ZC_MDNS_MAX_RR_NUM 4
+#define TCPIP_ZC_MDNS_PROBE_WAIT 750
+#define TCPIP_ZC_MDNS_PROBE_INTERVAL 250
+#define TCPIP_ZC_MDNS_PROBE_NUM 3
+#define TCPIP_ZC_MDNS_MAX_PROBE_CONFLICT_NUM 30
+#define TCPIP_ZC_MDNS_ANNOUNCE_NUM 3
+#define TCPIP_ZC_MDNS_ANNOUNCE_INTERVAL 250
+#define TCPIP_ZC_MDNS_ANNOUNCE_WAIT 250
+
+
+
 /*** ARP Configuration ***/
 #define TCPIP_ARP_CACHE_ENTRIES                 		5
 #define TCPIP_ARP_CACHE_DELETE_OLD		        	true
@@ -610,7 +658,7 @@ extern "C" {
 #define DRV_LAN8742A_PHY_CONFIG_FLAGS       ( 0 \
                                                     | DRV_ETHPHY_CFG_RMII \
                                                     )
-
+                                                    
 #define DRV_LAN8742A_PHY_LINK_INIT_DELAY            500
 #define DRV_LAN8742A_PHY_ADDRESS                    0
 #define DRV_LAN8742A_PHY_PERIPHERAL_ID              GMAC_BASE_ADDRESS

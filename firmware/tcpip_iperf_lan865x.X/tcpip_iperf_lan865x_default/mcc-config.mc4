@@ -9,6 +9,7 @@ groupModules:
   - tcpipDns
   - tcpipIperf
   - tcpipTelnet
+  - tcpipZeroConf
 - group: BASIC CONFIGURATION
   modules:
   - tcpipCmd
@@ -73,7 +74,7 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\config.h
   hash: 97d048aca9fc536435fb697f0f2a72f52d90d14b9f2ac52dc55b627c4850848e
 - file: ..\src\config\default\configuration.h
-  hash: 0e9271c07f370e9baf7f0e8e26398b262aa6d62d97a672b6a7747176685036b9
+  hash: 093ac7693c5ccfc46211be1ff24b32fb4ec9b9744b96459895e0cda7a8584a34
 - file: ..\src\config\default\crypto\crypto.h
   hash: 63bc6589b6538aeb76bc00351d3b99016c8357699c9403067f79a7f43461d208
 - file: ..\src\config\default\crypto\src\crypto.c
@@ -153,7 +154,7 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\exceptions.c
   hash: 251729130964d6a74b7a9ee99700b57a16c0e1b5d31029678e06ecd3d8dedc9e
 - file: ..\src\config\default\initialization.c
-  hash: dce5c12c796e0bbd514f6f5202ecd690cbf0ab383fc6cc29e7d41e4481826cff
+  hash: 3d685cf70f81ed238554f331c13837656b9f33a7e2b8b4f18a411203e7b9c10e
 - file: ..\src\config\default\interrupts.c
   hash: 3214f665642afe35e2f3f4a35d0fb417de2688d5b6e34bf6c744df2bfe9e950e
 - file: ..\src\config\default\interrupts.h
@@ -367,7 +368,7 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\library\tcpip\src\tcpip_packet.h
   hash: 2e5fb1156038bcc08245c1fd0270d7f40678fa005f0855653c94cb030053f3c0
 - file: ..\src\config\default\library\tcpip\src\tcpip_private.h
-  hash: 27e313c85067827c3a16ceec730479cd4e04c4e5f5b8210f2d49702a6de95450
+  hash: 99e4e01b16f0d5d03317b731cf5ae80742171589462d11c7f118185ab4054aef
 - file: ..\src\config\default\library\tcpip\src\tcpip_reboot_manager.h
   hash: ae0c90024a3a67c01b1e3b624f620ccc2f216577879f5f4977bf400f6c0e33a7
 - file: ..\src\config\default\library\tcpip\src\tcpip_types.h
@@ -394,16 +395,22 @@ generatedFileHashHistoryMap:
   hash: a3c7138f31d56ac604b52a1ccae780b1d17d9db76f7d44c980ede9b947787257
 - file: ..\src\config\default\library\tcpip\src\wsc_private.h
   hash: 09704fba5dbbbe4ebdf5f926f28d7d8dc8272f5e9111895cc920954c2d35b8e0
+- file: ..\src\config\default\library\tcpip\src\zero_conf_helper.c
+  hash: 9500220ab22b3b8c9860321ba5fd1599429c000755e265dbedd69819123bdcfb
 - file: ..\src\config\default\library\tcpip\src\zero_conf_helper.h
   hash: fc6bd610d1e2cc529aab3f5d44d8a5b5fa554eeb7c62ae4922c6dbba6050c09d
+- file: ..\src\config\default\library\tcpip\src\zero_conf_link_local.c
+  hash: 5c428f4885430bc9401fbae1e2a1e8e646331200225790d2b6630b55e3d6341a
 - file: ..\src\config\default\library\tcpip\src\zero_conf_link_local_private.h
   hash: a186e628ce3de4a151758bb5c959df31bb2c54692098e7f957b811cd175add4a
 - file: ..\src\config\default\library\tcpip\src\zero_conf_manager.h
   hash: 8fca0a795bc4967de3dfebb6fcb4c2f85e25de71e337eee0d849160d027d5112
+- file: ..\src\config\default\library\tcpip\src\zero_conf_multicast_dns.c
+  hash: 988d5c14949f50d15e2d178bf1bece7e914b76b46e8104e0ec68d3b092b16b41
 - file: ..\src\config\default\library\tcpip\tcp.h
   hash: e33c13ce23cdc23473bef55b68ac033f1abc6fcbff919ca82b4af97801137e59
 - file: ..\src\config\default\library\tcpip\tcpip.h
-  hash: a66ff9785b2835f13c199a73cb5281278b4b5fadcb39e2395c338f7ce8f34b33
+  hash: 7c25c033698159c5ec47051ca31db7c04e8d1c470d1cc7c3fd9129dae943896a
 - file: ..\src\config\default\library\tcpip\tcpip_announce.h
   hash: fdb314e051ce514dffcb6f4205c1a826f61e4de8d513b48cae614e9c3a479ae6
 - file: ..\src\config\default\library\tcpip\tcpip_commands.h
@@ -493,9 +500,9 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\peripheral\nvmctrl\plib_nvmctrl.h
   hash: fd7749dc74a885efd7c593394454abc74afc7cf184123f0315425a3600c26ac5
 - file: ..\src\config\default\peripheral\port\plib_port.c
-  hash: b3cb4d9cb17af8ce8903eeceb30c4cdb4e87cca6c796f2a12a97e8c840a35e34
+  hash: d05488e6d7a37dbfb52301669cbb176b2055cc8e95f8cfa36c9234fe91aae546
 - file: ..\src\config\default\peripheral\port\plib_port.h
-  hash: 623ce714ecf71ea0b420126b1732ffe8a7634d3ec036dfe7e84915bf321fb7f4
+  hash: 0105f0f55aa95c5e47dc6fa62546a52adbbbbe302867e966829203c78386b1c0
 - file: ..\src\config\default\peripheral\sercom\spi_master\plib_sercom0_spi_master.c
   hash: f09b1713efbc3235ed6b6662719b87332904c10983ed410b4ce692096fd45055
 - file: ..\src\config\default\peripheral\sercom\spi_master\plib_sercom0_spi_master.h
@@ -515,7 +522,7 @@ generatedFileHashHistoryMap:
 - file: ..\src\config\default\peripheral\tc\plib_tc_common.h
   hash: 487b4f489229b8e16b24ab48ddc1f414b095585439f0e10d53b2285fc3979f63
 - file: ..\src\config\default\pin_configurations.csv
-  hash: eb39332ba1fafb5d50ca6410a4398b5677b0288b44d5cb8fe755ce2d78551d11
+  hash: f255257ca96db395a607d54c4ff4b9e8dba84b329365da65e9ed56c70680a6fa
 - file: ..\src\config\default\startup_xc32.c
   hash: 2916a631dd72c23f29daf3ec7ebc84abec03a29948825df0b1505d670d73fe50
 - file: ..\src\config\default\stdio\xc32_monitor.c
