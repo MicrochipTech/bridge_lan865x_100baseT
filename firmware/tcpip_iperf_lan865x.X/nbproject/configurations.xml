@@ -791,6 +791,7 @@
                 <itemPath>../src/config/default/net_pres/pres/src/net_pres.c</itemPath>
               </logicalFolder>
               <itemPath>../src/config/default/net_pres/pres/net_pres_enc_glue.c</itemPath>
+              <itemPath>../src/config/default/net_pres/pres/net_pres_enc_glue_client.c</itemPath>
               <itemPath>../src/config/default/net_pres/pres/net_pres_cert_store.c</itemPath>
             </logicalFolder>
           </logicalFolder>
@@ -969,12 +970,16 @@
         <itemPath>../src/third_party/wolfssl/wolfssl/src/tls.c</itemPath>
         <itemPath>../src/third_party/wolfssl/wolfssl/src/keys.c</itemPath>
         <itemPath>../src/third_party/wolfssl/wolfssl/src/wolfio.c</itemPath>
+        <itemPath>../src/third_party/paho.mqtt.embedded-c/MQTTPacket/src/MQTTPacket.c</itemPath>
+        <itemPath>../src/third_party/paho.mqtt.embedded-c/MQTTPacket/src/MQTTConnectClient.c</itemPath>
+        <itemPath>../src/third_party/paho.mqtt.embedded-c/MQTTPacket/src/MQTTSerializePublish.c</itemPath>
       </logicalFolder>
       <itemPath>../src/app.c</itemPath>
       <itemPath>../src/main.c</itemPath>
       <itemPath>../src/env.c</itemPath>
       <itemPath>../src/lan865x_diag.c</itemPath>
       <itemPath>../src/cert_provision.c</itemPath>
+      <itemPath>../src/app_mqtt.c</itemPath>
       <itemPath>../src/port_mirror.c</itemPath>
       <itemPath>../src/noip_test.c</itemPath>
       <itemPath>../src/testserver.c</itemPath>
@@ -1046,7 +1051,7 @@
         <property key="exclude-floating-point" value="false"/>
         <property key="expand-pragma-config" value="false"/>
         <property key="extra-include-directories"
-                  value="../src;../src/config/default;../src/config/default/library;../src/config/default/library/tcpip/src;../src/config/default/library/tcpip/src/common;../src/packs/ATSAME54P20A_DFP;../src/packs/CMSIS/;../src/packs/CMSIS/CMSIS/Core/Include;../src/third_party/wolfssl;../src/third_party/wolfssl/wolfssl"/>
+                  value="../src;../src/config/default;../src/config/default/library;../src/config/default/library/tcpip/src;../src/config/default/library/tcpip/src/common;../src/packs/ATSAME54P20A_DFP;../src/packs/CMSIS/;../src/packs/CMSIS/CMSIS/Core/Include;../src/third_party/wolfssl;../src/third_party/wolfssl/wolfssl;../src/third_party/paho.mqtt.embedded-c/MQTTPacket/src"/>
         <property key="generate-16-bit-code" value="false"/>
         <property key="generate-micro-compressed-code" value="false"/>
         <property key="isolate-each-function" value="true"/>

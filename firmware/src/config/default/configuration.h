@@ -556,11 +556,19 @@ extern "C" {
    t1s-t1s-bridge-lan8670): pulls in the actual TLS protocol layer
    (ssl.c/internal.c/tls.c, vendored from the same net_10base_t1s-pinned
    wolfssl v5.4.0 package under third_party/wolfssl/wolfssl/src/), not just
-   the crypto primitives that were already linked in unused. Server-only
-   (NO_WOLFSSL_CLIENT) and TLS 1.2-only (no tls13.c vendored, NO_OLD_TLS below
-   forces >=1.2) to keep this to the single shared TLS session slot this board
-   can actually afford - see the RAM/heap discussion in the session log. */
-#define NO_WOLFSSL_CLIENT
+   the crypto primitives that were already linked in unused. TLS 1.2-only
+   (no tls13.c vendored, NO_OLD_TLS below forces >=1.2) to keep this to the
+   single shared TLS session slot per role this board can actually afford -
+   see the RAM/heap discussion in the session log.
+
+   NO_WOLFSSL_CLIENT (server-only) REMOVED for the MQTT-over-TLS work
+   (docs/mqtt-tls-agent-prompt.md): the board now also dials OUT as a TLS
+   client (net_pres_enc_glue_client.c, registered as NET_PRES's stream-CLIENT
+   provider) to reach the MQTT broker, in addition to the existing TLS
+   *server* roles (Telnet, bootload, cert_provision). wolfSSL's client-role
+   code (wolfSSL_connect(), wolfTLSv1_2_client_method(), etc.) was already
+   vendored in ssl.c/internal.c behind '#ifndef NO_WOLFSSL_CLIENT' - removing
+   this macro just re-enables it, no additional wolfSSL sources needed. */
 #define NO_OLD_TLS
 #define NO_SESSION_CACHE        /* one session at a time - resumption caching buys nothing here */
 /* This board has no RTC and no NTP/SNTP client wired up - confirmed no
@@ -603,6 +611,20 @@ extern "C" {
 #define NO_HC128
 #define NO_RABBIT
 #define HAVE_ECC
+/* Needed for wolfSSL to send the elliptic_curves/supported_groups extension
+   in the ClientHello (tls.c, gated by this macro throughout) - without it,
+   the existing Telnet/bootload/cert_provision SERVER role still worked
+   (the PEER, a Python client, sends this extension and the server just
+   picks a curve from it), but the new MQTT CLIENT role
+   (net_pres_enc_glue_client.c) does not: confirmed live 2026-09-07 via a
+   tshark capture of the ClientHello (only a signature_algorithms
+   extension, no elliptic_curves) against a Python/OpenSSL 3.x broker,
+   which failed the handshake with NO_SHARED_CIPHER - OpenSSL refuses to
+   select any ECDHE_* suite (the only ones offered, since NO_DH removed the
+   plain-DHE ones and static-RSA suites aren't in wolfSSL's default list
+   either) when the client never declared which curve it supports. */
+#define HAVE_TLS_EXTENSIONS
+#define HAVE_SUPPORTED_CURVES
 #define NO_DH
 #define NO_DSA
 #define FP_MAX_BITS 4096

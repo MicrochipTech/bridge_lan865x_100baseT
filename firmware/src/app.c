@@ -45,6 +45,7 @@
 #include "testserver.h"
 #include "bootload.h"
 #include "cert_provision.h"
+#include "app_mqtt.h"
 #include "crashlog.h"
 #include "cpuload.h"
 #include "leds.h"
@@ -873,6 +874,7 @@ void APP_Initialize ( void )
     TESTSERVER_Initialize();
     BOOTLOAD_Initialize();
     CERT_PROVISION_Initialize();   /* before any TLS socket can possibly be opened - see cert_provision.c */
+    MQTT_Initialize();
     /* MIRROR_Initialize() is deferred to APP_STATE_SERVICE_TASKS, NOT called here:
      * unlike the other three (which only register CLI commands), it allocates its
      * packet pool from the TCP/IP heap via TCPIP_PKT_PacketAlloc(). At this point
@@ -1232,6 +1234,10 @@ void APP_Tasks ( void )
             /* Remote TLS identity provisioning - see cert_provision.c. Does
              * nothing at all until 'cert_arm' opens its data port. */
             CERT_PROVISION_Tasks();
+
+            /* MQTT-over-mTLS status publisher - see app_mqtt.c. Does
+             * nothing until a broker is configured ('mqtt_broker <ip>'). */
+            MQTT_Tasks();
 
             /* === Deferred packet log output (max 10 entries per APP_Tasks iteration) === */
             if (ticks_per_ms > 0u) {

@@ -48,6 +48,7 @@ import bootload
 import pki
 import cert_provision
 import discover
+import mqtt_broker
 
 try:
     import serial
@@ -973,6 +974,7 @@ class BridgeGUITelnet:
         self.create_testmodes_tab()
         self.create_terminal_tab()
         self.create_certificates_tab()
+        self.create_mqtt_tab()
         self.create_about_tab()
 
         # Sofortiger Startwert, falls aus irgendeinem Grund kein <<NotebookTabChanged>>
@@ -1903,6 +1905,161 @@ class BridgeGUITelnet:
         threading.Thread(target=worker, daemon=True).start()
         self._cert_log("Resetting %s's identity..." % host)
 
+    def create_mqtt_tab(self):
+        """'MQTT' tab: start/stop the TLS-only (mTLS) broker
+        (scripts/mqtt_broker.py, wrapping amqtt) that boards publish their
+        status to (see docs/mqtt-tls-agent-prompt.md and firmware/src/
+        app_mqtt.c), and show connected clients / incoming messages live.
+
+        Same "thin Tk plumbing over a standalone module" split as the
+        Certificates tab: all broker logic lives in mqtt_broker.py, which
+        runs the actual amqtt asyncio broker in its own background thread
+        and exposes only a plain thread-safe queue.Queue - this tab polls it
+        with self.root.after(), the same self-rescheduling pattern
+        _blink_loop() already uses, since MQTT events (asyncio thread) are
+        unrelated to self.result_queue (serial/Telnet link results).
+        """
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="MQTT")
+
+        self.mqtt_service = mqtt_broker.MqttBrokerService()
+
+        top = ttk.LabelFrame(frame, text="Broker (TLS/mTLS only - no plaintext listener exists)", padding=5)
+        top.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(top, text="Bind IP:").grid(row=0, column=0, sticky=tk.W, padx=(0, 4))
+        self.mqtt_bind_var = tk.StringVar(value=mqtt_broker.DEFAULT_BIND_IP)
+        ttk.Entry(top, textvariable=self.mqtt_bind_var, width=14).grid(row=0, column=1, padx=(0, 12))
+        ttk.Label(top, text="Port:").grid(row=0, column=2, sticky=tk.W, padx=(0, 4))
+        self.mqtt_port_var = tk.StringVar(value=str(mqtt_broker.DEFAULT_PORT))
+        ttk.Entry(top, textvariable=self.mqtt_port_var, width=8).grid(row=0, column=3, padx=(0, 12))
+
+        self.mqtt_start_button = ttk.Button(top, text="Start Broker", command=self.mqtt_start_broker)
+        self.mqtt_start_button.grid(row=0, column=4, padx=(0, 4))
+        self.mqtt_stop_button = ttk.Button(top, text="Stop Broker", command=self.mqtt_stop_broker, state=tk.DISABLED)
+        self.mqtt_stop_button.grid(row=0, column=5)
+
+        self.mqtt_status_var = tk.StringVar(value="stopped")
+        ttk.Label(top, textvariable=self.mqtt_status_var, foreground="blue").grid(
+            row=1, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+
+        paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        clients_frame = ttk.LabelFrame(paned, text="Connected clients (live)", padding=5)
+        paned.add(clients_frame, weight=1)
+        columns = ("client_id", "remote", "cert_cn", "last_seen", "last_payload")
+        self.mqtt_clients_tree = ttk.Treeview(clients_frame, columns=columns, show="headings", height=10)
+        widths = {"client_id": 130, "remote": 100, "cert_cn": 110, "last_seen": 90, "last_payload": 220}
+        for col in columns:
+            self.mqtt_clients_tree.heading(col, text=col)
+            self.mqtt_clients_tree.column(col, width=widths[col], stretch=(col == "last_payload"))
+        self.mqtt_clients_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        clients_scroll = ttk.Scrollbar(clients_frame, orient=tk.VERTICAL, command=self.mqtt_clients_tree.yview)
+        clients_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mqtt_clients_tree.config(yscrollcommand=clients_scroll.set)
+
+        log_frame = ttk.LabelFrame(paned, text="Live message / event log", padding=5)
+        paned.add(log_frame, weight=1)
+        self.mqtt_log = tk.Text(log_frame, height=14, width=50, state=tk.DISABLED, wrap=tk.WORD)
+        self.mqtt_log.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        mqtt_log_scroll = ttk.Scrollbar(log_frame, command=self.mqtt_log.yview)
+        mqtt_log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mqtt_log.config(yscrollcommand=mqtt_log_scroll.set)
+
+        self._mqtt_client_rows = {}   # client_id -> (remote, cert_cn) - Treeview only stores displayed values
+        self._mqtt_poll_events()
+
+    def _mqtt_log(self, text: str):
+        self.mqtt_log.config(state=tk.NORMAL)
+        self.mqtt_log.insert(tk.END, "[%s] %s\n" % (time.strftime("%H:%M:%S"), text))
+        self.mqtt_log.see(tk.END)
+        self.mqtt_log.config(state=tk.DISABLED)
+
+    def mqtt_start_broker(self):
+        bind_ip = self.mqtt_bind_var.get().strip() or mqtt_broker.DEFAULT_BIND_IP
+        try:
+            port = int(self.mqtt_port_var.get().strip())
+        except ValueError:
+            messagebox.showerror("MQTT", "Port must be a number.")
+            return
+
+        self.mqtt_start_button.config(state=tk.DISABLED)
+        self.mqtt_status_var.set("starting...")
+
+        def worker():
+            try:
+                self.mqtt_service.start(bind_ip=bind_ip, port=port)
+            except mqtt_broker.BrokerError as e:
+                self.result_queue.put(("mqtt_start_failed", str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def mqtt_stop_broker(self):
+        self.mqtt_stop_button.config(state=tk.DISABLED)
+        threading.Thread(target=self.mqtt_service.stop, daemon=True).start()
+
+    def _mqtt_poll_events(self):
+        """Drains mqtt_service.events - scheduled via self.root.after(),
+        self-rescheduling the same way _blink_loop() does."""
+        try:
+            while True:
+                kind, payload, ts = self.mqtt_service.events.get_nowait()
+                when = time.strftime("%H:%M:%S", time.localtime(ts))
+
+                if kind == "started":
+                    self.mqtt_status_var.set("listening on %s (TLS/mTLS)" % payload)
+                    self.mqtt_start_button.config(state=tk.DISABLED)
+                    self.mqtt_stop_button.config(state=tk.NORMAL)
+                    self._mqtt_log("broker started on %s" % payload)
+
+                elif kind == "stopped":
+                    self.mqtt_status_var.set("stopped")
+                    self.mqtt_start_button.config(state=tk.NORMAL)
+                    self.mqtt_stop_button.config(state=tk.DISABLED)
+                    self.mqtt_clients_tree.delete(*self.mqtt_clients_tree.get_children())
+                    self._mqtt_client_rows.clear()
+                    self._mqtt_log("broker stopped")
+
+                elif kind == "error":
+                    self._mqtt_log("ERROR: %s" % payload)
+
+                elif kind == "client":
+                    client_id, remote, cert_cn = payload
+                    self._mqtt_client_rows[client_id] = (remote, cert_cn)
+                    if self.mqtt_clients_tree.exists(client_id):
+                        self.mqtt_clients_tree.item(client_id, values=(client_id, remote, cert_cn, when, ""))
+                    else:
+                        self.mqtt_clients_tree.insert("", tk.END, iid=client_id,
+                                                       values=(client_id, remote, cert_cn, when, ""))
+                    self._mqtt_log("client connected: %s (%s, cert CN=%s)" % (client_id, remote, cert_cn))
+
+                elif kind == "client_gone":
+                    client_id = payload
+                    self._mqtt_log("client disconnected: %s" % client_id)
+                    if self.mqtt_clients_tree.exists(client_id):
+                        self.mqtt_clients_tree.delete(client_id)
+                    self._mqtt_client_rows.pop(client_id, None)
+
+                elif kind == "message":
+                    client_id, topic, data = payload
+                    try:
+                        preview = data.decode("utf-8", errors="replace")
+                    except Exception:
+                        preview = repr(data)
+                    remote, cert_cn = self._mqtt_client_rows.get(client_id, ("", ""))
+                    if self.mqtt_clients_tree.exists(client_id):
+                        self.mqtt_clients_tree.item(client_id, values=(client_id, remote, cert_cn, when, preview))
+                    else:
+                        # A retained/late message from a client this GUI session never
+                        # saw CLIENT_CONNECTED for (e.g. broker restarted mid-session).
+                        self.mqtt_clients_tree.insert("", tk.END, iid=client_id,
+                                                       values=(client_id, remote, cert_cn, when, preview))
+                    self._mqtt_log("%s -> %s: %s" % (client_id, topic, preview))
+        except queue.Empty:
+            pass
+        self.root.after(300, self._mqtt_poll_events)
+
     def create_about_tab(self):
         """Create About/Help tab"""
         frame = ttk.Frame(self.notebook)
@@ -2633,6 +2790,13 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     _, text = result
                     if hasattr(self, 'cert_output'):
                         self._cert_log(text)
+
+                elif result[0] == "mqtt_start_failed":
+                    _, error = result
+                    self.mqtt_status_var.set("stopped")
+                    self.mqtt_start_button.config(state=tk.NORMAL)
+                    self._mqtt_log("ERROR: %s" % error)
+                    messagebox.showerror("MQTT", "Broker failed to start:\n%s" % error)
 
                 elif result[0] == "discover_results":
                     _, rows, source = result

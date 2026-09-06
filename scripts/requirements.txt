@@ -24,3 +24,14 @@ pyocd==0.43.0
 # is no plain-ttk fallback build anymore (the separate "_modern" comparison
 # builds were merged into these two files, see docs/FALLSTRICKE.md 2026-08-28).
 sv-ttk==2.6.1
+
+# X.509 cert/key generation and inspection: pki.py, mqtt_broker.py (used by: 2)
+# Was already a de-facto dependency (pki.py has imported it since it was
+# written) but missing from this file until now - a fresh
+# "pip install -r requirements.txt" was silently incomplete.
+cryptography==50.0.1
+
+# TLS-only MQTT broker (docs/mqtt-tls-agent-prompt.md): mqtt_broker.py,
+# the "MQTT" tab in bridge_gui_telnet.py (used by: 2). hbmqtt, the older
+# project this was forked from, is unmaintained - do not substitute it in.
+amqtt==0.12.0

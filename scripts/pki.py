@@ -59,6 +59,19 @@ CA_KEY_PATH = CA_DIR / "ca_key.pem"
 CLIENT_CERT_PATH = CLIENT_DIR / "client_cert.pem"
 CLIENT_KEY_PATH = CLIENT_DIR / "client_key.pem"
 
+# MQTT broker identity (docs/mqtt-tls-agent-prompt.md): the broker
+# (scripts/mqtt_broker.py) needs its own SERVER_AUTH leaf so boards can
+# verify it against the project CA, same shape as issue_board_identity()
+# below - its own directory, not certs/boards/<id>/, since the broker is not
+# "a board". The board's OWN side of that mTLS handshake does NOT get a new
+# identity here: it reuses whatever cert_provision.c already manages on that
+# board (CERT_PROVISION_ActiveServerIdentity() / ActiveCa()) - the same
+# cert/key it already presents for Telnet/bootload - rather than a second,
+# unmanaged identity that cert_arm/cert_save/cert_show could never reach.
+MQTT_DIR = CERTS_DIR / "mqtt"
+MQTT_BROKER_CERT_PATH = MQTT_DIR / "mqtt_broker_cert.pem"
+MQTT_BROKER_KEY_PATH = MQTT_DIR / "mqtt_broker_key.pem"
+
 KEY_SIZE = 2048
 VALIDITY_DAYS = 7300  # ~20 years - see NO_ASN_TIME note above
 ORG_NAME = "bridge_lan865x_100baseT"
@@ -104,6 +117,18 @@ def fingerprint(cert: x509.Certificate) -> str:
 
 def _sign_leaf(name: str, public_key, ca_cert: x509.Certificate, ca_key,
                eku, sans=None) -> x509.Certificate:
+    # eku may be a single ExtendedKeyUsageOID or a list of them - a board's
+    # identity needs both SERVER_AUTH (Telnet/bootload/cert_provision) and
+    # CLIENT_AUTH (this same identity is reused as the MQTT client's
+    # certificate - see the comment above issue_mqtt_broker_identity()).
+    eku_list = eku if isinstance(eku, (list, tuple)) else [eku]
+    # SubjectKeyIdentifier/AuthorityKeyIdentifier are not optional in practice:
+    # found 2026-09-06 issuing the MQTT broker identity (docs/mqtt-tls-agent-prompt.md)
+    # - a leaf without them failed TLS verification on this machine's OpenSSL with
+    # "Missing Authority Key Identifier", even though the chain itself was otherwise
+    # correct (verified with `openssl verify`, which is lenient about this). Every
+    # leaf this function has ever issued (board/client/broker identities) was missing
+    # both - re-issue if a client is seen failing verification with that error.
     subject = x509.Name([
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, ORG_NAME),
         x509.NameAttribute(NameOID.COMMON_NAME, name),
@@ -118,7 +143,11 @@ def _sign_leaf(name: str, public_key, ca_cert: x509.Certificate, ca_key,
         .not_valid_before(now)
         .not_valid_after(now + datetime.timedelta(days=VALIDITY_DAYS))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(x509.ExtendedKeyUsage([eku]), critical=False)
+        .add_extension(x509.ExtendedKeyUsage(eku_list), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()),
+            critical=False)
     )
     if sans:
         builder = builder.add_extension(x509.SubjectAlternativeName(sans), critical=False)
@@ -205,6 +234,33 @@ def issue_client_identity(name: str = "bridge-client", force: bool = False):
 
 
 # -----------------------------------------------------------------------
+# MQTT broker identity (docs/mqtt-tls-agent-prompt.md): the broker's own TLS
+# SERVER identity. From the same project CA as everything else, so the
+# existing trust anchor every board already has (bridge_certs.h's compiled-in
+# CA / CERT_PROVISION_ActiveCa()) verifies it with no firmware-side change.
+# There is deliberately no matching issue_mqtt_client_identity(): the board's
+# side of this mTLS handshake reuses whatever cert_provision.c already
+# manages on that board (its existing server cert/key) rather than a second,
+# unmanaged identity - see the MQTT_DIR comment above.
+# -----------------------------------------------------------------------
+
+def issue_mqtt_broker_identity(name: str = "bridge-mqtt-broker", force: bool = False):
+    """The broker's own TLS server identity (scripts/mqtt_broker.py) - what
+    boards verify against the project CA before they trust the broker enough
+    to present their own client certificate."""
+    if MQTT_BROKER_CERT_PATH.is_file() and not force:
+        raise PkiError("an MQTT broker identity already exists at %s - pass "
+                        "force=True to replace it" % MQTT_BROKER_CERT_PATH)
+    ca_cert, ca_key = load_ca()
+    key = _new_keypair()
+    cert = _sign_leaf(name, key.public_key(), ca_cert, ca_key,
+                       ExtendedKeyUsageOID.SERVER_AUTH)
+    _write_pem_cert(MQTT_BROKER_CERT_PATH, cert)
+    _write_pem_key(MQTT_BROKER_KEY_PATH, key)
+    return cert, key
+
+
+# -----------------------------------------------------------------------
 # Per-board server identity
 # -----------------------------------------------------------------------
 
@@ -269,7 +325,8 @@ def issue_board_identity(board_id: str, ip: str = "", probe_serial: str = "",
         except ValueError:
             sans = [x509.DNSName(ip)]
     cert = _sign_leaf(board_id, key.public_key(), ca_cert, ca_key,
-                       ExtendedKeyUsageOID.SERVER_AUTH, sans=sans)
+                       [ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH],
+                       sans=sans)
 
     cert_dir = _board_cert_dir(board_id)
     cert_der = cert.public_bytes(serialization.Encoding.DER)
@@ -327,6 +384,9 @@ if __name__ == "__main__":
 
     sub.add_parser("list-boards")
 
+    p = sub.add_parser("issue-mqtt-broker")
+    p.add_argument("--force", action="store_true")
+
     args = ap.parse_args()
 
     if args.cmd == "ca-status":
@@ -343,3 +403,7 @@ if __name__ == "__main__":
     elif args.cmd == "list-boards":
         for b in list_boards():
             print("%-20s %-16s %s" % (b["board_id"], b.get("ip", ""), b["fingerprint_sha256"]))
+    elif args.cmd == "issue-mqtt-broker":
+        cert, _ = issue_mqtt_broker_identity(force=args.force)
+        print("MQTT broker identity:", MQTT_BROKER_CERT_PATH)
+        print("  fingerprint:", fingerprint(cert))

@@ -1,5 +1,5 @@
 {
-  "ip": "192.168.0.12",
+  "ip": "192.168.0.31",
   "telnet_user": "admin",
   "telnet_password": "password",
   "bootload_port": 5567,

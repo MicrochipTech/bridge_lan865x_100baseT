@@ -1,0 +1,13 @@
+{
+  "board_id": "bridge-192-168-0-21",
+  "created": "2026-09-06T12:25:01.193354+00:00",
+  "ip": "192.168.0.21",
+  "probe_serial": "",
+  "fingerprint_sha256": "0F:C2:43:05:F7:B0:78:D5:58:B3:5F:03:47:90:4D:45:53:1F:BA:91:08:16:71:44:BD:50:D2:3E:EB:C5:D7:79",
+  "serial_number": "517f4173def92bcb80464b5dbaebd57f78d0bf",
+  "not_valid_before": "2026-09-06T12:25:01+00:00",
+  "not_valid_after": "2046-09-01T12:25:01+00:00",
+  "cert_pem": "certs\\boards\\bridge-192-168-0-21\\server_cert.pem",
+  "key_pem": "certs\\boards\\bridge-192-168-0-21\\server_key.pem",
+  "provisioned": false
+}

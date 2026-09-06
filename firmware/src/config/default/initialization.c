@@ -528,6 +528,7 @@ static const DRV_MIIM_INIT drvMiimInitData_0 =
 
 /* Net Presentation Layer Data Definitions */
 #include "net_pres/pres/net_pres_enc_glue.h"
+#include "net_pres/pres/net_pres_enc_glue_client.h"
 
 static const NET_PRES_TransportObject netPresTransObject0SS = {
     .fpOpen        = (NET_PRES_TransOpen)TCPIP_TCP_ServerOpen,
@@ -635,7 +636,7 @@ static const NET_PRES_INST_DATA netPresCfgs[] =
         .pTransObject_ds = &netPresTransObject0DS,
         .pTransObject_dc = &netPresTransObject0DC,
         .pProvObject_ss = &NET_PRES_EncProviderObject_wolfSSL_Stream,
-        .pProvObject_sc = NULL,
+        .pProvObject_sc = &NET_PRES_EncProviderObject_wolfSSL_StreamClient,
         .pProvObject_ds = NULL,
         .pProvObject_dc = NULL,
     },

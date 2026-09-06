@@ -2648,6 +2648,133 @@ completed step — do not wait until the end of the session.
     broadcast-based discovery from a PC on the ordinary Ethernet side does
     not hit.
 
+### DoS root-caused and fixed: `NET_PRES_SocketDisconnect()` could permanently strand a socket slot
+
+- Logged retroactively - this fix was made and left in the working tree
+  uncommitted while the session moved on to the MQTT connect-hang bug; found
+  during a pre-commit review on 2026-09-07 and is being committed together
+  with that day's work, but the investigation and fix themselves belong here.
+- Root cause of the "flood the bridge with rapid connect+abrupt-RST cycles ->
+  every TLS-accepting service (Telnet/bootload/cert_provision, all sharing
+  one fixed `NET_PRES_NUM_SOCKETS`-sized pool) goes permanently unreachable
+  at once, with no crash and no faultlog entry" DoS: `NET_PRES_SocketDisconnect()`
+  (`net_pres.c`) only reset `pSkt->status` back to
+  `NET_PRES_ENC_SS_WAITING_TO_START_NEGOTIATION` when it was already *above*
+  that value. A flood of rapid connect/RST cycles can reach
+  `NET_PRES_SocketDisconnect()` with `status` sitting AT OR BELOW that value
+  for a connection that is nonetheless being torn down - in that case the
+  old code skipped the reset entirely. `NET_PRES_Tasks()`'s own per-tick pump
+  only ever services sockets whose `status` is `WAITING_TO_START_NEGOTIATION`/
+  `CLIENT_NEGOTIATING`/`SERVER_NEGOTIATING` - any other leftover value drops
+  that socket slot out of the pump permanently, with no timeout and no other
+  path back in.
+- Fix: unconditionally reset `pSkt->status` back to
+  `WAITING_TO_START_NEGOTIATION` whenever the transport-level disconnect
+  itself succeeded (`res == true`), independent of what `status` was before.
+  `fpClose()` stays separately gated on `pSkt->provOpen` (the actual "is
+  there a live provider session to close" fact) exactly as before - this
+  change can only cause additional cleanup to run, never less.
+- **Not yet re-verified with a fresh flood run after this specific fix** -
+  the live flood testing that found the bug predates the fix in the working
+  tree; re-running the same flood-test procedure once this is committed
+  would close out the finding properly.
+
+## 2026-09-07
+
+### MQTT-over-mTLS client: connect-hang root-caused to three separate bugs, all fixed and verified live
+
+- Picked up from 2026-09-06's finding that `MQTT_ST_WAIT_TLS` was reading
+  `NET_PRES_SocketWasReset()`/`WasDisconnected()` as an instant (and false)
+  failure signal. User pushed back explicitly on any fixed/blanket-wait
+  workaround - "es muss sichergesttellt werden das die verbindung aufegaut
+  und abgesichter ist. da hilf kein pauschales warten sondern mann muss auf
+  den stack pollen" - so the fix already in place (poll
+  `IsConnected()&&IsSecure()` every tick, fail only via a 20s deadline, no
+  `WasReset()` check while waiting - matches `cert_provision.c`'s
+  `CP_WAIT_CONN`) was re-verified rather than assumed correct.
+- **Symptom before this session:** Telnet's own raw TCP connect started
+  timing out entirely (`socket.create_connection()` -> `TimeoutError`) while
+  `ping` to the board kept working - i.e. ICMP fine, TCP wedged. Traced to a
+  pile of **six leftover `scripts/mqtt_broker.py` processes** from earlier
+  test rounds, all still bound to port 8884 via the OS allowing multiple
+  listeners - never killed between test iterations. Killed all six,
+  confirmed `netstat` clean, started exactly one fresh broker instance -
+  Telnet was reachable again immediately. Lesson: always check
+  `netstat -ano | grep <port>` -> `Get-CimInstance Win32_Process` for stray
+  listeners before trusting a "the board is unreachable" symptom during
+  iterative live testing.
+- With a clean broker and a fresh `pyocd reset`, the 20s deadline genuinely
+  fired and retried on schedule - confirming the 2026-09-06 stale-flag fix
+  was correct. But the connection still never completed: `wolfSSL err=0` on
+  every timeout (no TLS byte ever exchanged) and the broker's own log showed
+  **zero** connection attempts.
+- **Root cause 1 (build config): missing `HAVE_SUPPORTED_CURVES`.** A
+  `tshark` capture on the PC's "Ethernet 8" NIC during a connect attempt
+  showed the full TCP handshake completing (SYN/SYN-ACK/ACK) and a genuine
+  ClientHello reaching the broker (88 bytes) - but the broker replied with
+  `ACK+FIN` instead of a ServerHello, closing immediately. Restarting
+  `mqtt_broker.py` with `logging.basicConfig(DEBUG)` (amqtt/asyncio log
+  nothing by default) surfaced the real exception:
+  `ssl.SSLError: [SSL: NO_SHARED_CIPHER] no shared cipher`. Decoding the
+  captured ClientHello (`tshark -Y "tls.handshake.type==1" -V`) showed it
+  offered `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` etc. - which IS in
+  Python's `ssl.create_default_context()` cipher list - but with **no
+  `elliptic_curves`/`supported_groups` extension at all**, only
+  `signature_algorithms`. OpenSSL 3.x refuses to select any ECDHE_* suite
+  when the client never declared a supported curve, and `NO_DH` had already
+  removed the plain-DHE fallback suites, leaving zero overlap. wolfSSL only
+  sends that extension when `HAVE_SUPPORTED_CURVES` is defined, which itself
+  requires `HAVE_TLS_EXTENSIONS` (confirmed via a `#error` at first build
+  attempt) - neither had ever been defined in this project. Added both to
+  `configuration.h` (HAND-PATCH-style comment explaining why the existing
+  Telnet/bootload/cert_provision **server** role never needed this: the
+  Python **client** side of that connection already sends the extension, so
+  the server just picks from it). This is a build-wide fix - every board
+  needs to be reflashed with it, not just reconfigured.
+- **Root cause 2 (PKI): the board's identity had no Authority Key
+  Identifier.** After the cipher fix, the handshake progressed further and
+  failed with `CERTIFICATE_VERIFY_FAILED: Missing Authority Key Identifier`
+  - the same class of bug already fixed in `pki.py`'s `_sign_leaf()` on
+  2026-09-06 for the MQTT broker's own identity, but this particular board's
+  identity (`bridge-ATML3264031800001049`, issued 2026-09-05, i.e. before
+  that fix) still predated it. Reissued via
+  `pki.py issue-board bridge-ATML3264031800001049 --ip 192.168.0.12 --force`,
+  pushed with `cert_provision.py --push-board ...`, reset to activate.
+- **Root cause 3 (PKI): wrong Extended Key Usage for the reused identity.**
+  With the AKI fixed, the very next handshake attempt failed with a
+  *different* error - `CERTIFICATE_VERIFY_FAILED: unsuitable certificate
+  purpose`. `pki.py issue_board_identity()` had always issued board
+  identities with `ExtendedKeyUsage=serverAuth` only, correct for their
+  original (and only, until this project's MQTT work) role as the Telnet/
+  bootload/cert_provision **server** identity. The 2026-09-06 architecture
+  decision to have the MQTT client **reuse** that same managed identity
+  (rather than provision a second, unmanaged one - EEPROM cert-storage
+  budget was already ~99% full) means it now also needs `clientAuth`, which
+  it never had. Fixed `_sign_leaf()` to accept a list of EKU OIDs instead of
+  one, and `issue_board_identity()` now issues
+  `[SERVER_AUTH, CLIENT_AUTH]`. Reissued/pushed/reset the same board again
+  with the corrected identity.
+- **Verified fully working end-to-end** on the real bench board
+  (192.168.0.12): mTLS handshake completes, MQTT CONNECT/CONNACK succeeds,
+  `mqtt_status` shows `state=connected`, and the broker's log confirms a
+  `bridge/bridge-000425CACED9/status` JSON publish arriving every 5s exactly
+  as designed, sustained for 48s+ with Telnet staying fully responsive
+  throughout (the earlier Telnet instability was a symptom of the repeated
+  failed-handshake churn from the wrong config/certs, not a genuine
+  concurrency bug in the TCP stack).
+- **Known follow-up, not yet done:** the other two bench boards
+  (192.168.0.21, .31) still carry server-only-EKU identities issued before
+  today's fix - they will hit the identical "unsuitable certificate purpose"
+  error the moment they are reflashed with this firmware and try MQTT. Same
+  three-step fix applies (`issue-board --force` -> `push-board` -> reset).
+- **Correction while preparing today's commit:** the DoS finding from
+  2026-09-06 (TCP-wide lockup under a connect/RST-churn flood) was in fact
+  already root-caused and fixed in the working tree
+  (`NET_PRES_SocketDisconnect()`, `net_pres.c`) before this MQTT bug hunt
+  started - it had just never been logged or committed. Backfilled as its
+  own entry under 2026-09-06 above, and committed together with today's
+  work. Still needs a fresh flood run to re-verify the fix itself.
+
 ---
 
 <!-- Append new dated entries above this line as work continues. -->
