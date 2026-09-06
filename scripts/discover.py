@@ -74,15 +74,26 @@ def _directed_broadcast(base_ip: str) -> str:
     return ".".join(parts[:3]) + ".255"
 
 
+DISCOVERY_QUERY_RESEND_INTERVAL = 0.25
+
+
 def broadcast_discover(base_ip: str, timeout: float = 1.0, port: int = DISCOVERY_UDP_PORT):
-    """Broadcast one discovery query on base_ip's /24 and collect replies for
+    """Broadcast a discovery query on base_ip's /24 and collect replies for
     `timeout` seconds. Returns a list of {"ip", "mac"} dicts, sorted by IP -
     same shape of use as scan_subnet() but no fingerprint (no TLS happens
     here at all) and typically returns well under a second instead of
     several. ip comes from the reply's own source address (always correct);
     the MAC in the payload identifies which of the board's two interfaces
     (eth0/T1S or eth1/100BASE-TX - this board bridges both) actually
-    answered."""
+    answered.
+
+    Resends the query every DISCOVERY_QUERY_RESEND_INTERVAL instead of
+    sending it just once: confirmed live (2026-09-06) that a single query
+    already misses a board that answers reliably to a TLS probe seconds
+    later - plain UDP, no retransmission of its own, so one lost query or
+    reply is enough. A few resends inside the same listen window cost
+    nothing extra in wall-clock time and dedupe for free (`found` is keyed
+    by ip)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -90,9 +101,12 @@ def broadcast_discover(base_ip: str, timeout: float = 1.0, port: int = DISCOVERY
     sock.settimeout(0.2)
     found = {}
     try:
-        sock.sendto(DISCOVERY_QUERY_MAGIC, (_directed_broadcast(base_ip), port))
         deadline = time.time() + timeout
+        next_send = 0.0
         while time.time() < deadline:
+            if time.time() >= next_send:
+                sock.sendto(DISCOVERY_QUERY_MAGIC, (_directed_broadcast(base_ip), port))
+                next_send = time.time() + DISCOVERY_QUERY_RESEND_INTERVAL
             try:
                 data, addr = sock.recvfrom(64)
             except socket.timeout:
@@ -107,7 +121,12 @@ def broadcast_discover(base_ip: str, timeout: float = 1.0, port: int = DISCOVERY
 
 
 TELNET_PORT = 23
-TCP_TIMEOUT = 0.3
+# 0.3s was too tight for a real host under the full sweep's own congestion -
+# confirmed live (2026-09-06): a board that connects in 0.01-0.02s in
+# isolation timed out its TCP connect at 0.313s under a full /24 sweep.
+# 0.6s gives real hosts margin without meaningfully slowing down the sweep
+# (dead addresses still dominate the pacing, see SUBMIT_INTERVAL).
+TCP_TIMEOUT = 0.6
 # A lone handshake against a real board takes ~1.15-1.2s (measured live,
 # docs/tls-poc-report.md sec.10 - RSA-2048 on the board's Cortex-M4F is the
 # cost, even with the SP/ASM speed-up). Under MAX_WORKERS concurrent
@@ -125,6 +144,15 @@ MAX_WORKERS = 16
 # onto. 30ms caps that around ~33/s; the whole scan still finishes in well
 # under 10s on a quiet /24.
 SUBMIT_INTERVAL = 0.03
+# Retry budget for a host that answered the TCP connect but didn't finish
+# the TLS handshake within TLS_TIMEOUT during the paced sweep - confirmed
+# live (2026-09-06) that a board reached through the Bridge's T1S forwarding
+# (e.g. a Follower) intermittently loses that race under a full /24 sweep's
+# ARP-broadcast load, even though an isolated probe against it alone
+# completes in ~1.2s. Set comfortably above the firmware's own
+# ENC_CONNECT_TIMEOUT_MS=15s handshake-wedge budget
+# (net_pres_enc_glue.c) so a legitimately slow handshake gets to finish.
+RETRY_TLS_TIMEOUT = 16.0
 
 TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "ca" / "ca_cert.pem"
 TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "client" / "client_cert.pem"
@@ -142,14 +170,17 @@ def _subnet_from_base_ip(base_ip: str):
     return ["%s.%d" % (prefix, i) for i in range(1, 255)]
 
 
-def _probe(ip: str):
-    """Returns a dict on a confirmed board, None otherwise. Never raises -
-    every failure mode (closed port, TCP timeout, TLS/cert rejection) just
-    means "not one of ours" here."""
+def _probe(ip: str, timeout: float = TLS_TIMEOUT):
+    """Returns (result, tcp_ok). result is a dict on a confirmed board, None
+    otherwise. tcp_ok tells "no such host" (TCP connect itself failed) apart
+    from "host answered but the TLS handshake didn't finish in time" - only
+    the latter is worth scan_subnet() retrying with a longer budget. Never
+    raises - every failure mode (closed port, TCP timeout, TLS/cert
+    rejection) just means "not one of ours" here."""
     try:
         raw = socket.create_connection((ip, TELNET_PORT), timeout=TCP_TIMEOUT)
     except OSError:
-        return None
+        return None, False
 
     try:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -158,11 +189,11 @@ def _probe(ip: str):
         ctx.load_verify_locations(cafile=str(TLS_CA_CERT))
         ctx.load_cert_chain(certfile=str(TLS_CLIENT_CERT), keyfile=str(TLS_CLIENT_KEY))
         ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
-        raw.settimeout(TLS_TIMEOUT)
+        raw.settimeout(timeout)
         ts = ctx.wrap_socket(raw, server_hostname=ip)
     except Exception:
         raw.close()
-        return None
+        return None, True
 
     try:
         peer_der = ts.getpeercert(binary_form=True)
@@ -170,11 +201,11 @@ def _probe(ip: str):
         ts.close()
 
     if not peer_der:
-        return None
+        return None, True
 
     import hashlib
     fp = hashlib.sha256(peer_der).hexdigest()
-    return {"ip": ip, "fingerprint_sha256": fp}
+    return {"ip": ip, "fingerprint_sha256": fp}, True
 
 
 def scan_subnet(base_ip: str, max_workers: int = MAX_WORKERS, progress=None):
@@ -184,19 +215,48 @@ def scan_subnet(base_ip: str, max_workers: int = MAX_WORKERS, progress=None):
     use it to drive a progress bar; scanning 254 addresses typically takes
     several seconds on a quiet LAN.
 
-    Submits candidates paced by SUBMIT_INTERVAL rather than all 254 at once:
-    this board bridges the scanned Ethernet segment onto 10BASE-T1S
-    (tcpip_mac_bridge.c) - confirmed live (2026-09-05) that an unpaced burst
-    of connection attempts across a whole /24 (each one's ARP resolution for
-    a non-existent host is itself a broadcast) gets forwarded onto the much
-    slower T1S segment and overflows the LAN865x's receive FIFO
-    (`LAN865x_0 Status0.Receive Buffer Overflow Error`, drv_lan865x_api.c) -
-    repeated scans this way eventually wedged all three bench boards'
-    Telnet/TCP stack solid (ping still answered, port 23 did not; recovered
-    only with a SWD reset). Pacing the submissions keeps the ARP broadcast
-    rate well under what the T1S side needs to be able to drain."""
-    candidates = _subnet_from_base_ip(base_ip)
+    First TLS-probes, individually and with the generous RETRY_TLS_TIMEOUT,
+    whatever broadcast_discover() reports (near-instant, see that function) -
+    this is what actually finds a board reached through the Bridge's T1S
+    forwarding reliably (confirmed live, 2026-09-06: such a board's own
+    handshake completes in ~1.2s in isolation, but was lost intermittently by
+    the full-sweep path below under that sweep's own broadcast load). Then
+    still runs the full paced /24 sweep for whatever broadcast didn't report
+    (e.g. its responder is down but Telnet/TLS still works, or firmware
+    predates it) - this is why both stay: the broadcast prefilter is a
+    reliability/speed improvement, not a trust dependency, since the TLS
+    handshake alone still identifies every board either path finds.
+
+    The full sweep submits candidates paced by SUBMIT_INTERVAL rather than
+    all at once: this board bridges the scanned Ethernet segment onto
+    10BASE-T1S (tcpip_mac_bridge.c) - confirmed live (2026-09-05) that an
+    unpaced burst of connection attempts across a whole /24 (each one's ARP
+    resolution for a non-existent host is itself a broadcast) gets forwarded
+    onto the much slower T1S segment and overflows the LAN865x's receive
+    FIFO (`LAN865x_0 Status0.Receive Buffer Overflow Error`,
+    drv_lan865x_api.c) - repeated scans this way eventually wedged all three
+    bench boards' Telnet/TCP stack solid (ping still answered, port 23 did
+    not; recovered only with a SWD reset). Pacing the submissions keeps the
+    ARP broadcast rate well under what the T1S side needs to be able to
+    drain. Any host that answered the TCP connect but didn't finish its TLS
+    handshake within TLS_TIMEOUT is retried once, serially, with
+    RETRY_TLS_TIMEOUT - the retry only touches hosts already confirmed live,
+    so it can't itself trigger the ARP-broadcast load this sweep paces
+    against."""
     found = []
+    found_ips = set()
+    try:
+        live_ips = [r["ip"] for r in broadcast_discover(base_ip)]
+    except OSError:
+        live_ips = []
+    for ip in live_ips:
+        result, _tcp_ok = _probe(ip, timeout=RETRY_TLS_TIMEOUT)
+        if result:
+            found.append(result)
+            found_ips.add(ip)
+
+    candidates = [ip for ip in _subnet_from_base_ip(base_ip) if ip not in found_ips]
+    retry_ips = []
     done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {}
@@ -207,9 +267,17 @@ def scan_subnet(base_ip: str, max_workers: int = MAX_WORKERS, progress=None):
             done += 1
             if progress:
                 progress(done, len(candidates))
-            result = future.result()
+            result, tcp_ok = future.result()
             if result:
                 found.append(result)
+            elif tcp_ok:
+                retry_ips.append(futures[future])
+
+    for ip in retry_ips:
+        result, _tcp_ok = _probe(ip, timeout=RETRY_TLS_TIMEOUT)
+        if result:
+            found.append(result)
+
     found.sort(key=lambda r: tuple(int(x) for x in r["ip"].split(".")))
     return found
 
