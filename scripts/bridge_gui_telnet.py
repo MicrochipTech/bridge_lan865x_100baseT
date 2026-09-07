@@ -107,7 +107,7 @@ MEMORYFILE_XML = (Path(__file__).parent.parent / "firmware" / "tcpip_iperf_lan86
 
 # TLS bring-up (branch t1s-t1s-bridge-lan8670): the firmware's Telnet port now
 # requires a TLS handshake with mutual certificate auth (net_pres_enc_glue.c) -
-# this is this project's own CA/client identity (certs/ca/ + certs/bridge/,
+# this is this project's own CA/client identity (certs/ca/ + certs/default/,
 # repo root), generated with openssl, NOT wolfSSL's public test certs. See
 # pki.py's module docstring for why the CA lives in its own directory
 # (certs/ca/, separate from any leaf identity) and the session log for why a
@@ -272,7 +272,7 @@ def _wrap_telnet_tls(sock, host):
     the socket and propagates.
 
     check_hostname is off on purpose: the server cert's CN ("bridge-server",
-    certs/bridge/server_cert.pem) is a fixed name picked at cert-generation
+    certs/default/server_cert.pem) is a fixed name picked at cert-generation
     time, not the board's IP - there is no DNS/mDNS name here to match against.
     The server's identity is still verified (CERT_REQUIRED, against our CA),
     just not by hostname.
@@ -280,7 +280,7 @@ def _wrap_telnet_tls(sock, host):
     for path in (TLS_CA_CERT, TLS_CLIENT_CERT, TLS_CLIENT_KEY):
         if not path.is_file():
             raise FileNotFoundError(
-                "missing TLS file: %s (see certs/bridge/ - regenerate with openssl "
+                "missing TLS file: %s (see certs/default/ - regenerate with openssl "
                 "if this was never checked out)" % path)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
@@ -1811,8 +1811,18 @@ class BridgeGUITelnet:
             return
         ip = simpledialog.askstring("Issue board identity", "Board IP (optional):",
                                     parent=self.root, initialvalue=self.ip_var.get().strip())
+        force = False
+        if pki.board_info(board_id) is not None:
+            force = messagebox.askyesno(
+                "Reissue board identity",
+                "Board '%s' already has an identity.\n\n"
+                "Reissue it? The old identity stops working once the new one "
+                "is pushed and the board is reset - remember to 'Push Selected "
+                "Board Identity to Device' afterwards." % board_id)
+            if not force:
+                return
         try:
-            info = pki.issue_board_identity(board_id, ip=ip or "")
+            info = pki.issue_board_identity(board_id, ip=ip or "", force=force)
             self._cert_log("Issued identity for '%s': %s" % (board_id, info["fingerprint_sha256"]))
             self.cert_refresh_boards()
         except pki.PkiError as e:

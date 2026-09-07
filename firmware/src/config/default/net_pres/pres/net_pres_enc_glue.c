@@ -15,7 +15,7 @@
     struct's address is all that's stored there.
 
     Bring-up only: fpInit loads this project's own generated RSA-2048 CA/
-    server cert/key (bridge_certs.h, see certs/bridge/ and certs/ca/ for the
+    server cert/key (bridge_certs.h, see certs/default/ and certs/ca/ for the
     source .pem files and how to regenerate) - NOT wolfSSL's public test
     certs (wolfssl/certs_test.h), which turned out to be both expired (all
     dated 2022-2024) and mismatched (client_cert_der_2048 does not chain to

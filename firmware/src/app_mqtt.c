@@ -3,6 +3,7 @@
  * non-blocking CONNECT/PUBLISH state machine on the pure MQTTPacket
  * serializers instead of using paho.mqtt.embedded-c's blocking MQTTClient-C.
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -56,6 +57,19 @@ static NET_PRES_SKT_HANDLE_T s_sock  = INVALID_SOCKET;
 static IPV4_ADDR            s_broker_ip;
 static NET_PRES_SKT_PORT_T  s_broker_port = (NET_PRES_SKT_PORT_T)MQTT_BROKER_PORT_DEFAULT;
 static bool                 s_broker_configured = false;
+
+/* Which interface to pin the outbound connection to (see mqtt_attempt_connect()) -
+ * defaults to eth1, but not every board's real network uplink IS eth1: a
+ * board that only sits on the T1S bus and reaches the LAN by being bridged
+ * through another board's own eth1 (confirmed live 2026-09-07, 'stats' on
+ * such a board: eth1 TX ok=0/err=57, eth0 TX ok=409 - eth1 is simply
+ * unconnected hardware on that unit) needs 'mqtt_broker <ip> -i eth0'
+ * instead. Not auto-detected on purpose - which interface is the board's
+ * real uplink is a per-unit wiring fact this project has no reliable
+ * runtime way to determine (link-up alone doesn't distinguish "wired but
+ * bridged-only" from "wired and the real uplink"), so the operator states
+ * it explicitly, same as 'ping <ip> i eth1' already requires. */
+static char                 s_broker_iface[8] = "eth1";
 
 static char     s_client_id[24];
 static char     s_topic[40];
@@ -140,17 +154,16 @@ static void mqtt_attempt_connect(void)
     memcpy(addr.addr, &s_broker_ip, sizeof s_broker_ip);
 
     /* Open UNCONNECTED (addr=NULL) rather than handing the remote address
-     * straight to SocketOpen: this board has TWO interfaces on the SAME
-     * 192.168.0.0/24 subnet (eth0/T1S, eth1/100BASE-TX - see env.c), so
+     * straight to SocketOpen: on at least this project's own bench units,
      * "which interface is this destination on" is genuinely ambiguous to
      * the stack's own routing, exactly like 'ping <ip>' needs an explicit
      * 'i eth1' to disambiguate. Confirmed live 2026-09-06 with a pktmon
      * capture: TCPIP_TCP_ClientOpen()'s automatic interface selection sent
      * the SYN out eth0 (T1S) instead, where no capture on the PC's NIC
      * could ever have seen it - not a network/firewall problem at all.
-     * Pin the raw TCP_SOCKET to eth1 explicitly before dialing, same
-     * mechanism the 'ping'/'iperf' console commands use
-     * (TCPIP_STACK_NetHandleGet("eth1") + TCPIP_TCP_SocketNetSet()). */
+     * Pin the raw TCP_SOCKET to s_broker_iface explicitly before dialing,
+     * same mechanism the 'ping'/'iperf' console commands use
+     * (TCPIP_STACK_NetHandleGet() + TCPIP_TCP_SocketNetSet()). */
     s_sock = NET_PRES_SocketOpen(0, NET_PRES_SKT_ENCRYPTED_STREAM_CLIENT,
                                   (NET_PRES_SKT_ADDR_T)IP_ADDRESS_TYPE_IPV4,
                                   s_broker_port, NULL, &err);
@@ -161,15 +174,14 @@ static void mqtt_attempt_connect(void)
         return;
     }
 
-    /* Pin to eth1 ONLY long enough to get the SYN transmitted out the
-     * correct physical wire, then clear it again - confirmed live
+    /* Pin to s_broker_iface ONLY long enough to get the SYN transmitted out
+     * the correct physical wire, then clear it again - confirmed live
      * 2026-09-06/07:
-     *   - Without pinning at all: the SYN never appears on the PC-facing
-     *     NIC ("Ethernet 8") - it goes out eth0/T1S instead, a completely
-     *     different physical medium a PC NIC cannot see. This board has
-     *     two interfaces on the identical 192.168.0.0/24 subnet (eth0/T1S,
-     *     eth1/100BASE-TX - see env.c), exactly like 'ping <ip>' needing an
-     *     explicit 'i eth1' to disambiguate.
+     *   - Without pinning at all: the SYN can come out the wrong interface
+     *     entirely (e.g. eth0/T1S when the peer is only reachable via
+     *     eth1/100BASE-TX, or vice versa on a board wired the other way
+     *     round), invisible to whatever capture point was expected to see
+     *     it - not a network/firewall problem at all.
      *   - Pinned and LEFT pinned: the SYN correctly reaches the peer and
      *     the peer's SYN-ACK correctly reaches the board back on the wire -
      *     but the board never completes the handshake (no ACK, no RST,
@@ -177,13 +189,13 @@ static void mqtt_attempt_connect(void)
      *     F_TcpFindMatchingSocket() (~line 4567):
      *         (pSkt->pSktNet == NULL || pSkt->pSktNet == pPktIf)
      *     TCPIP_TCP_SocketNetSet() sets pSkt->pSktNet to whatever
-     *     TCPIP_STACK_NetHandleGet("eth1") returns; if that handle isn't
+     *     TCPIP_STACK_NetHandleGet() returned; if that handle isn't
      *     bit-identical to whatever this project's bridging plumbing
      *     stamps into pRxPkt->pktIf for a frame that physically arrived on
-     *     eth1, every reply for this connection silently fails this match
-     *     and is dropped before it ever reaches the SYN_SENT-state code -
-     *     with no RST, since "no matching socket for a bare ACK" is a
-     *     silent-ignore case, not an error case, in this stack.
+     *     that interface, every reply for this connection silently fails
+     *     this match and is dropped before it ever reaches the SYN_SENT-
+     *     state code - with no RST, since "no matching socket for a bare
+     *     ACK" is a silent-ignore case, not an error case, in this stack.
      *   - Fix: pSktNet only needs to steer the OUTBOUND SYN. Clearing it
      *     back to NULL right after Connect() (persistent=false, so nothing
      *     server-related is touched) makes F_TcpFindMatchingSocket()'s
@@ -191,13 +203,13 @@ static void mqtt_attempt_connect(void)
      *     on this connection from here on, without giving up the interface
      *     control that got the SYN out the right wire in the first place. */
     {
-        TCPIP_NET_HANDLE eth1 = TCPIP_STACK_NetHandleGet("eth1");
+        TCPIP_NET_HANDLE ifH = TCPIP_STACK_NetHandleGet(s_broker_iface);
         TCP_SOCKET tcpSkt = (TCP_SOCKET)(intptr_t)NET_PRES_SocketGetTransportHandle(s_sock);
-        if (eth1 == NULL || !TCPIP_TCP_SocketNetSet(tcpSkt, eth1, false)) {
+        if (ifH == NULL || !TCPIP_TCP_SocketNetSet(tcpSkt, ifH, false)) {
             mqtt_close_socket();
             s_deadline = mqtt_now() + (uint64_t)MQTT_RETRY_INTERVAL_MS * s_ticks_per_ms;
             (void)snprintf(s_last_fail_reason, sizeof s_last_fail_reason,
-                            "eth1 SocketNetSet failed");
+                            "%s SocketNetSet failed", s_broker_iface);
             return;
         }
 
@@ -293,19 +305,46 @@ static void mqtt_send_pingreq(void)
 static void cmd_mqtt_broker(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv)
 {
     IPV4_ADDR addr;
+    NET_PRES_SKT_PORT_T port = (NET_PRES_SKT_PORT_T)MQTT_BROKER_PORT_DEFAULT;
+    char iface[sizeof s_broker_iface];
+    int i;
 
-    if (argc < 2 || argc > 3) {
-        CMD_PRINT(pCmdIO, "Usage: mqtt_broker <ip> [port]\r\n");
+    if (argc < 2) {
+        CMD_PRINT(pCmdIO, "Usage: mqtt_broker <ip> [port] [-i eth0|eth1]\r\n");
         return;
     }
     if (!TCPIP_Helper_StringToIPAddress(argv[1], &addr)) {
         CMD_PRINT(pCmdIO, "MQTT: bad IP '%s'\r\n", argv[1]);
         return;
     }
-    s_broker_ip = addr;
-    if (argc == 3) {
-        s_broker_port = (NET_PRES_SKT_PORT_T)strtoul(argv[2], NULL, 0);
+    (void)snprintf(iface, sizeof iface, "%s", s_broker_iface);   /* keep the current one unless -i overrides it */
+
+    /* [port] and '-i <ifname>' can appear in either order after the IP -
+     * matches how the existing 'ping <ip> [i <ifname>]' console command
+     * already lets the interface option float relative to other args. */
+    for (i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "-i") == 0) {
+            if ((i + 1) >= argc) {
+                CMD_PRINT(pCmdIO, "MQTT: -i needs an interface name (eth0/eth1)\r\n");
+                return;
+            }
+            i++;
+            if (strlen(argv[i]) >= sizeof iface) {
+                CMD_PRINT(pCmdIO, "MQTT: interface name '%s' too long\r\n", argv[i]);
+                return;
+            }
+            (void)snprintf(iface, sizeof iface, "%s", argv[i]);
+        } else if (isdigit((unsigned char)argv[i][0]) != 0) {
+            port = (NET_PRES_SKT_PORT_T)strtoul(argv[i], NULL, 0);
+        } else {
+            CMD_PRINT(pCmdIO, "MQTT: unknown argument '%s'\r\n", argv[i]);
+            return;
+        }
     }
+
+    s_broker_ip = addr;
+    s_broker_port = port;
+    (void)snprintf(s_broker_iface, sizeof s_broker_iface, "%s", iface);
     s_broker_configured = true;
 
     /* Re-dial immediately against the new address rather than waiting out
@@ -314,8 +353,8 @@ static void cmd_mqtt_broker(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv)
     s_state = MQTT_ST_IDLE;
     s_deadline = mqtt_now();
 
-    CMD_PRINT(pCmdIO, "MQTT: broker set to %s:%u - connecting\r\n",
-              argv[1], (unsigned)s_broker_port);
+    CMD_PRINT(pCmdIO, "MQTT: broker set to %s:%u via %s - connecting\r\n",
+              argv[1], (unsigned)s_broker_port, s_broker_iface);
 }
 
 static const char *mqtt_state_name(void)
@@ -332,13 +371,13 @@ static const char *mqtt_state_name(void)
 static void cmd_mqtt_status(SYS_CMD_DEVICE_NODE *pCmdIO, int argc, char **argv)
 {
     (void)argc; (void)argv;
-    CMD_PRINT(pCmdIO, "MQTT: state=%s client_id=%s topic=%s port=%u seq=%lu last_fail=%s\r\n",
+    CMD_PRINT(pCmdIO, "MQTT: state=%s client_id=%s topic=%s port=%u if=%s seq=%lu last_fail=%s\r\n",
               mqtt_state_name(), s_client_id, s_topic, (unsigned)s_broker_port,
-              (unsigned long)s_seq, s_last_fail_reason);
+              s_broker_iface, (unsigned long)s_seq, s_last_fail_reason);
 }
 
 static const SYS_CMD_DESCRIPTOR mqtt_cmd_tbl[] = {
-    {"mqtt_broker", (SYS_CMD_FNC)cmd_mqtt_broker, ": set/show the MQTT broker (mqtt_broker <ip> [port], default port 8883)"},
+    {"mqtt_broker", (SYS_CMD_FNC)cmd_mqtt_broker, ": set/show the MQTT broker (mqtt_broker <ip> [port] [-i eth0|eth1], default port 8883, default if eth1)"},
     {"mqtt_status", (SYS_CMD_FNC)cmd_mqtt_status, ": show the MQTT client's current state"},
 };
 
