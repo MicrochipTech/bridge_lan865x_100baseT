@@ -51,6 +51,10 @@ import pki
 DEFAULT_BIND_IP = "0.0.0.0"
 DEFAULT_PORT = 8883
 
+# How long to let amqtt's own graceful shutdown run before dropping the loop -
+# see the comment at the end of _async_main() for what happens without a bound.
+SHUTDOWN_TIMEOUT = 5.0
+
 # Drained by MqttBrokerService.events (an alias, not a copy) - see the
 # module docstring for why this is process-global rather than per-instance.
 _event_queue: "queue.Queue" = queue.Queue()
@@ -198,7 +202,20 @@ class MqttBrokerService:
         try:
             await self._stop_evt.wait()
         finally:
-            await broker.shutdown()
+            # Bounded: amqtt's own shutdown() waits on its connected client
+            # sessions, and a still-connected embedded client that never gets
+            # to answer keeps it waiting indefinitely. Measured 2026-09-07:
+            # with three boards connected, stop() had still not completed after
+            # 32 s, so the broker could not be restarted at all
+            # ("broker already running") - and the GUI's "Stop Broker" button
+            # would hang exactly the same way, since it calls this same
+            # service. Giving up on the graceful path and dropping the loop is
+            # correct here: the listener is closed either way, and the clients
+            # detect the dead connection on their own (they already retry).
+            try:
+                await asyncio.wait_for(broker.shutdown(), timeout=SHUTDOWN_TIMEOUT)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                pass
             self._running.clear()
             self.events.put(("stopped", None, time.time()))
 

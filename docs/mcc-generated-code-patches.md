@@ -950,6 +950,32 @@ line in the boot log; the check is `help`, which lists the groups that made it.
 
 ---
 
+## Project-owned files that live under `config\default\` but are NOT MCC output
+
+Three files sit inside the generated tree yet were written by this project and
+are not produced by any MCC component. They need no patch — MCC neither
+generates nor deletes them — but they are listed here so a reader auditing
+`config\default\` does not mistake them for generated code that lost its patch,
+and so nobody "restores" them to a pristine MCC state that never existed:
+
+| File | What it is |
+|---|---|
+| `net_pres\pres\net_pres_enc_glue.c` | wolfSSL glue implementing the `Net_ProvObject` vtable for TLS **server** sockets (Telnet, bootload, cert provisioning). Added in `02595a7`. |
+| `net_pres\pres\net_pres_enc_glue_client.c` / `.h` | The same for TLS **client** sockets, so the board can dial out (the MQTT client). Added 2026-09-07. |
+
+What *is* MCC-generated and therefore patched is the wiring that points at them:
+`initialization.c`'s `pProvObject_ss` / `pProvObject_sc` assignments and the
+client-glue include (`patches/initialization.patch`), plus the wolfSSL build
+configuration in `configuration.h` (enforced by `apply_patches.py`'s
+`apply_tls_config_fix()`, not by a `.patch` — MCC rewrites that file on nearly
+every Generate Code, so a whole-file diff would conflict constantly).
+
+**If the wiring is lost:** the glue files still compile and link, but nothing
+ever calls them — every TLS service on the board silently degrades to "connection
+accepted, then dropped". `patches/apply_patches.py --check` catches it.
+
+---
+
 *See `docs/session-log.md` for the full chronological investigation behind each of
 these, `CLAUDE.md` section 3 for the running list this document was assembled from,
 and `CLAUDE.md`'s own "MCC Generate Code impact analysis" entry in `session-log.md`

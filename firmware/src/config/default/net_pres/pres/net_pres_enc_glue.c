@@ -287,45 +287,45 @@ static NET_PRES_EncSessionStatus EncGlue_Connect(void *providerData)
     return NET_PRES_ENC_SS_FAILED;
 }
 
-/* Pumps wolfSSL_shutdown()'s bidirectional close_notify exchange; frees the
-   conn struct only once it reports CLOSED, matching the "provider data has
-   been freed" contract for that state.
+/* Sends close_notify best-effort, then ALWAYS frees the session and reports
+   CLOSED - deliberately single-pass.
 
-   Bounded by ENC_CLOSE_TIMEOUT_MS: a peer that vanished without sending its
-   own close_notify would otherwise keep this returning CLOSING forever - see
-   the define's comment for why that matters with only one connection slot. */
+   This used to return NET_PRES_ENC_SS_CLOSING while waiting for the peer's own
+   close_notify, freeing only once wolfSSL_shutdown() completed the exchange.
+   That is a guaranteed memory leak in this stack: **nothing in net_pres.c ever
+   calls fpClose() a second time.** Every one of its three call sites
+   (F_NET_PRES_Deinitialize, NET_PRES_SocketDisconnect, NET_PRES_SocketClose)
+   invokes it exactly once as `(void)(*fpClose)(...)`, discards the returned
+   status, and immediately clears provOpen - so a CLOSING reply means the
+   WOLFSSL object and this conn struct are never freed by anyone.
+
+   Measured cost of that leak, 2026-09-07 on real hardware: a client that
+   closes its TCP connection without a TLS close_notify first (i.e. every
+   ordinary abrupt disconnect - Python's ssl module, a closed GUI, a dropped
+   link) took this path every time. The C-runtime heap
+   (NO_WOLFSSL_MEMORY - wolfSSL allocates via plain malloc) fell from a
+   10 KB largest-free-block to 656 bytes after ~10 Telnet sessions, at which
+   point wolfSSL_new() could no longer allocate and EVERY further TLS
+   connection - Telnet, bootload, cert provisioning and the MQTT client alike -
+   was dropped mid-handshake. Symptom: SSLEOFError/handshake timeouts on a
+   board that still answers ping and whose TCP and NET_PRES socket tables both
+   look perfectly healthy; recoverable only by a reset. Root-caused by reading
+   TCBStubs[]/sNetPresSockets[] over SWD (both clean), then `meminfo` over the
+   serial console (the C-runtime heap exhausted).
+
+   A graceful bidirectional shutdown is not worth a leak that bricks every TLS
+   service on the board: one wolfSSL_shutdown() attempt still emits our own
+   close_notify, which is all the peer needs to see. */
 static NET_PRES_EncSessionStatus EncGlue_Close(void *providerData)
 {
     EncGlueConn *conn = EncGlue_ConnFromProviderData(providerData);
-    int ret;
 
-    if (s_ticksPerMs == 0u) {
-        s_ticksPerMs = (uint64_t)SYS_TIME_FrequencyGet() / 1000ULL;
-    }
-    if (conn->closeDeadline == 0u) {
-        conn->closeDeadline = SYS_TIME_Counter64Get()
-                             + (uint64_t)ENC_CLOSE_TIMEOUT_MS * s_ticksPerMs;
-    }
-
-    ret = wolfSSL_shutdown(conn->ssl);
-
-    if (ret == WOLFSSL_SUCCESS) {
-        wolfSSL_free(conn->ssl);
-        free(conn);
+    if (conn == NULL) {
         return NET_PRES_ENC_SS_CLOSED;
     }
 
-    int err = wolfSSL_get_error(conn->ssl, ret);
-    if ((err == WOLFSSL_ERROR_WANT_READ) || (err == WOLFSSL_ERROR_WANT_WRITE)) {
-        if ((int64_t)(SYS_TIME_Counter64Get() - conn->closeDeadline) < 0) {
-            return NET_PRES_ENC_SS_CLOSING;
-        }
-        /* Timed out waiting for the peer's close_notify - give up on a
-           graceful shutdown and free the slot anyway. */
-    }
+    (void)wolfSSL_shutdown(conn->ssl);   /* best effort - our close_notify goes out */
 
-    /* Peer gone/error mid-shutdown, or the timeout above fired - nothing
-       more to send, clean up now. */
     wolfSSL_free(conn->ssl);
     free(conn);
     return NET_PRES_ENC_SS_CLOSED;

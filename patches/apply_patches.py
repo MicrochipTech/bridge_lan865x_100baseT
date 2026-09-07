@@ -59,6 +59,42 @@ STDARG_FIXES = [
     ),
 ]
 
+# The wolfSSL/TLS contract configuration.h must satisfy for this project's
+# mutual-TLS features (Telnet, bootload, cert provisioning, the MQTT client) to
+# build and work at all. Deliberately NOT a .patch file: MCC rewrites
+# configuration.h on essentially every Generate Code for unrelated reasons
+# (pins, components, heap sizes), so a whole-file diff would conflict
+# constantly. This is the same idempotent check-and-fix shape as STDARG_FIXES.
+#
+# Each entry was verified against the commit that introduced it:
+#   TCPIP_TELNET_MAX_CONNECTIONS 2 -> 1, NO_ASN_TIME added     (31ca819)
+#   NO_WOLFSSL_CLIENT removed, HAVE_TLS_EXTENSIONS +
+#   HAVE_SUPPORTED_CURVES added                                (f4ed669)
+#   WOLFCRYPT_ONLY removed                                     (c6c32ae)
+TLS_CONFIG_PATH = "firmware/src/config/default/configuration.h"
+TLS_CONFIG_ANCHOR = "// ---------- FUNCTIONAL CONFIGURATION START ----------"
+TLS_REQUIRED_DEFINES = [
+    # (macro, why it matters if MCC drops it)
+    ("NO_OLD_TLS", "forces TLS >= 1.2"),
+    ("NO_SESSION_CACHE", "one session at a time; no resumption cache"),
+    ("NO_ASN_TIME", "no RTC on this board - every cert would look 'not yet valid'"),
+    ("WOLFSSL_HAVE_SP_RSA", "Cortex-M assembly RSA; without it a handshake blocks ~1.6s"),
+    ("WOLFSSL_SP_ARM_CORTEX_M_ASM", "selects that ASM path"),
+    ("HAVE_TLS_EXTENSIONS", "prerequisite of HAVE_SUPPORTED_CURVES"),
+    ("HAVE_SUPPORTED_CURVES", "without it the ClientHello carries no curve list and "
+                               "a strict TLS 1.2 peer answers NO_SHARED_CIPHER"),
+]
+# Macros MCC generates that must NOT be active - each one disables a whole half
+# of the TLS feature set.
+TLS_FORBIDDEN_DEFINES = [
+    ("WOLFCRYPT_ONLY", "would drop the entire TLS protocol layer, leaving only crypto"),
+    ("NO_WOLFSSL_CLIENT", "would drop wolfSSL_connect() - the MQTT client cannot dial out"),
+]
+# (macro, required value, what MCC generates instead)
+TLS_REQUIRED_VALUES = [
+    ("TCPIP_TELNET_MAX_CONNECTIONS", "1", "MCC generates 2; this board has RAM for one TLS session"),
+]
+
 # --- Helpers ------------------------------------------------------------
 
 def repo_root():
@@ -118,6 +154,65 @@ def apply_stdarg_fix(root, label, rel_path, anchor, dry_run):
     return label, "APPLIED", "was missing, inserted"
 
 
+def apply_tls_config_fix(root, dry_run):
+    """Enforce the wolfSSL/TLS contract in configuration.h (see the tables above).
+
+    Returns the usual (label, status, detail) triple. Reports every individual
+    deviation it found, because a partially-reverted configuration.h is the
+    dangerous case: it still compiles, and the failure only shows up as a TLS
+    handshake that mysteriously stops working.
+    """
+    import re
+
+    label = "configuration.h wolfSSL/TLS"
+    path = root / TLS_CONFIG_PATH
+    if not path.exists():
+        return label, "FAILED", f"file not found: {TLS_CONFIG_PATH}"
+    text = path.read_text(encoding="utf-8")
+    problems, fixes = [], []
+
+    for macro, why in TLS_REQUIRED_DEFINES:
+        if not re.search(r"^\s*#define\s+%s\b" % re.escape(macro), text, re.M):
+            problems.append(f"missing #define {macro} ({why})")
+            fixes.append(("add", macro))
+
+    for macro, why in TLS_FORBIDDEN_DEFINES:
+        if re.search(r"^\s*#define\s+%s\b" % re.escape(macro), text, re.M):
+            problems.append(f"#define {macro} is back ({why})")
+            fixes.append(("remove", macro))
+
+    for macro, want, note in TLS_REQUIRED_VALUES:
+        m = re.search(r"^\s*#define\s+%s\s+(\S+)" % re.escape(macro), text, re.M)
+        if m is None:
+            problems.append(f"missing #define {macro} (want {want}; {note})")
+        elif m.group(1) != want:
+            problems.append(f"{macro} is {m.group(1)}, want {want} ({note})")
+            fixes.append(("value", macro, want))
+
+    if not problems:
+        return label, "OK", "all TLS-critical settings present, nothing to do"
+    if dry_run:
+        return label, "WOULD APPLY", "; ".join(problems)
+    if TLS_CONFIG_ANCHOR not in text:
+        return label, "FAILED", (f"anchor {TLS_CONFIG_ANCHOR!r} not found - fix by hand: "
+                                  + "; ".join(problems))
+
+    for fix in fixes:
+        if fix[0] == "add":
+            text = text.replace(TLS_CONFIG_ANCHOR,
+                                 f"#define {fix[1]}\n{TLS_CONFIG_ANCHOR}", 1)
+        elif fix[0] == "remove":
+            text = re.sub(r"^(\s*)#define\s+%s\b.*$" % re.escape(fix[1]),
+                           r"\1/* #define %s */  /* removed - see patches/apply_patches.py */"
+                           % fix[1], text, count=1, flags=re.M)
+        else:  # value
+            text = re.sub(r"^(\s*#define\s+%s\s+)\S+" % re.escape(fix[1]),
+                           r"\g<1>%s" % fix[2], text, count=1, flags=re.M)
+
+    path.write_text(text, encoding="utf-8")
+    return label, "APPLIED", "; ".join(problems)
+
+
 # --- Main -----------------------------------------------------------------
 
 def main():
@@ -139,6 +234,10 @@ def main():
     # recurring MCC bug (item 6) has struck again, telnet.patch's context
     # won't match until stdarg.h is back - apply that fix before attempting
     # the .patch files, not after.
+    # The wolfSSL/TLS contract in configuration.h is checked alongside them:
+    # it is not a .patch either, for the reason given at TLS_CONFIG_PATH.
+    rows.append(apply_tls_config_fix(root, args.check))
+
     for label, rel_path, anchor in STDARG_FIXES:
         rows.append(apply_stdarg_fix(root, label, rel_path, anchor, args.check))
     for patch_path in patch_files:

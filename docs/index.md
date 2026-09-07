@@ -21,6 +21,8 @@ project was built, why particular decisions were made, and what was measured.
 | know what throughput to expect, and why | [`iperf_matrix_results.md`](iperf_matrix_results.md) |
 | know how much CPU headroom the main loop has, and how to measure it yourself | [`cpuload-profiling-report.md`](cpuload-profiling-report.md) |
 | see the firmware running on a board that has no 100BASE-TX PHY | [`three-board-rollout-report.md`](three-board-rollout-report.md) |
+| debug a board live with pyOCD (breakpoints, fault postmortems, recovery resets) | [`pyocd-agent-debugging-guide.md`](pyocd-agent-debugging-guide.md) |
+| flash a board over the network instead of with a debug probe | [`bootload-agent-flashing-guide.md`](bootload-agent-flashing-guide.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
 
@@ -99,6 +101,22 @@ be killed once its ARP never resolves (no longer triggered), and an assumption
 in the matrix script that this bench no longer satisfies (fixed). Ends with an
 explicit verification-status table saying which board state is covered by which
 test, and what is not verified.
+
+### [`pyocd-agent-debugging-guide.md`](pyocd-agent-debugging-guide.md) — pyOCD recipes for an AI agent
+Practical, tested pyOCD recipes for debugging this board live: environment
+specifics (target/pack/probe selection on a multi-board bench), quick CLI checks,
+`faultlog` + `xc32-addr2line` postmortems with no debugger needed, an interactive
+breakpoint-debugging Python-API recipe (with the "halt before arming a breakpoint,
+or it silently never fires" gotcha that cost real time the first time), and the
+one safety rule that matters most on a networked target: a halted core is a dead
+board on the network until resumed.
+
+### [`bootload-agent-flashing-guide.md`](bootload-agent-flashing-guide.md) — flashing over the network
+The operational recipe for updating firmware via this project's own dual-bank OTA
+mechanism instead of a debug probe: the `bootload.py` command and what a healthy
+run looks like, what a wedged board's Telnet-connect failure means and how to
+recover it (a plain SWD reset, not a flash), and why this path is preferred over
+`flash.bat`/pyOCD whenever a board is network-reachable.
 
 ### [`session-log.md`](session-log.md) — chronological bring-up record
 *2406 lines, by far the largest document here.* Every step of the bring-up in

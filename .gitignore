@@ -42,3 +42,9 @@ firmware/tcpip_iperf_lan865x.X/dist/
 # run-specific; the summarised results are what gets committed, under docs\.
 docs/iperf_matrix_results.log
 docs/sniffer_capture_results.log
+
+# Throwaway material scripts\testplan_runner.py generates for its negative
+# tests: a self-signed CA the project deliberately does NOT trust, used to
+# prove that a foreign-CA client certificate is rejected. Regenerated on
+# demand; never a trusted part of the project's PKI (that lives in certs\).
+scripts/_testplan_scratch/

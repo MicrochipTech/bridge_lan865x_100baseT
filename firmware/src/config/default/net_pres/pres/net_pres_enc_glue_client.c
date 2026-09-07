@@ -276,7 +276,6 @@ static NET_PRES_EncSessionStatus EncGlueClient_Connect(void *providerData)
 static NET_PRES_EncSessionStatus EncGlueClient_Close(void *providerData)
 {
     EncGlueClientConn *conn = EncGlueClient_ConnFromProviderData(providerData);
-    int ret;
 
     /* Reachable, unlike net_pres_enc_glue.c's server-side EncGlue_Close():
      * NET_PRES_SocketClose() (net_pres.c) calls fpClose() unconditionally
@@ -295,28 +294,18 @@ static NET_PRES_EncSessionStatus EncGlueClient_Close(void *providerData)
         return NET_PRES_ENC_SS_CLOSED;
     }
 
-    if (s_ticksPerMs == 0u) {
-        s_ticksPerMs = (uint64_t)SYS_TIME_FrequencyGet() / 1000ULL;
-    }
-    if (conn->closeDeadline == 0u) {
-        conn->closeDeadline = SYS_TIME_Counter64Get()
-                             + (uint64_t)ENC_CLIENT_CLOSE_TIMEOUT_MS * s_ticksPerMs;
-    }
-
-    ret = wolfSSL_shutdown(conn->ssl);
-
-    if (ret == WOLFSSL_SUCCESS) {
-        wolfSSL_free(conn->ssl);
-        free(conn);
-        return NET_PRES_ENC_SS_CLOSED;
-    }
-
-    int err = wolfSSL_get_error(conn->ssl, ret);
-    if ((err == WOLFSSL_ERROR_WANT_READ) || (err == WOLFSSL_ERROR_WANT_WRITE)) {
-        if ((int64_t)(SYS_TIME_Counter64Get() - conn->closeDeadline) < 0) {
-            return NET_PRES_ENC_SS_CLOSING;
-        }
-    }
+    /* Single-pass on purpose - same reasoning as net_pres_enc_glue.c's
+     * EncGlue_Close(): net_pres.c never calls fpClose() a second time, so
+     * returning NET_PRES_ENC_SS_CLOSING here would leak the WOLFSSL object
+     * and this conn struct outright. See that function's comment for the
+     * measured effect (C-runtime heap down to a 656-byte largest free block
+     * after ~10 sessions, every TLS service on the board dead until reset).
+     *
+     * It matters at least as much on this client side: MQTT_Tasks() redials
+     * every MQTT_RETRY_INTERVAL_MS after any failure, so a broker that is
+     * simply not reachable would otherwise leak one session per retry - a
+     * few minutes of a stopped broker would be enough to exhaust the heap. */
+    (void)wolfSSL_shutdown(conn->ssl);   /* best effort - our close_notify goes out */
 
     wolfSSL_free(conn->ssl);
     free(conn);

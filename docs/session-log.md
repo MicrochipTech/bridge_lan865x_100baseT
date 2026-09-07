@@ -2774,6 +2774,200 @@ completed step — do not wait until the end of the session.
   started - it had just never been logged or committed. Backfilled as its
   own entry under 2026-09-06 above, and committed together with today's
   work. Still needs a fresh flood run to re-verify the fix itself.
+  Committed as `f4ed669`.
+
+### TLS subnet-scan discrepancy explained; GUI couldn't reissue an existing board identity
+
+- User compared the GUI's "Broadcast Discover" (found 3 real boards) against
+  its "TLS Scan" (looked like only 2, with a duplicate). Root-caused both
+  parts, no bug in the scan logic itself:
+  - `192.168.0.11` showing the exact same board_id/fingerprint as
+    `192.168.0.12` is real, not a scan bug: `arp -a` showed their MACs are
+    `...D9`/`...DA`, one apart - the same physical board's two interfaces
+    (eth0/T1S at `.11`, eth1/100BASE-T at `.12`). `cert_provision.c` manages
+    one identity per *board*, not per interface, so both IPs correctly
+    answer with the identical certificate - the same eth0-direct-addressing
+    fact already logged on 2026-09-06.
+  - `192.168.0.31` missing from the TLS scan is because
+    `TCPIP_TELNET_MAX_CONNECTIONS` is `1` (`configuration.h:374`) and the
+    GUI itself was already connected to `.31` over Telnet at scan time - the
+    scan's own probe to the same port on the same board is refused outright
+    since the board's one Telnet slot was already held.
+- Separately, `cert_issue_board_dialog()` (`bridge_gui_telnet.py`) never
+  passed `force=True` to `pki.issue_board_identity()`, so reissuing any
+  board that already had an identity (e.g. `bridge-192-168-0-21`) always hit
+  "already has an identity - pass force=True" with no way through from the
+  GUI - only the command line could do it. Fixed: the dialog now detects
+  that case, confirms with the user, and reissues.
+
+### MQTT broker rejecting the two follower boards - two different, unrelated causes
+
+- User pointed a packet capture (`mqtt.pcapng`) at the question of why
+  `192.168.0.21` and `.31` couldn't reach the MQTT broker after `.12` was
+  already working. Decoded with `tshark`, no decryption needed (or possible
+  - the cipher suite is ECDHE, so forward secrecy means the session keys
+  cannot be recovered after the fact even with every certificate/private
+  key; the handshake messages themselves are unencrypted anyway, which is
+  all this needed).
+  - `.21`: 4 separate connection attempts, each dying at the identical
+    point - the broker slams the connection shut (raw FIN, no TLS alert)
+    the instant it receives `.21`'s client certificate. Exact fingerprint of
+    a client-cert verification failure, same as `.12` before its fix -
+    `.21` was still running its pre-fix identity (server-only EKU, no AKI).
+  - `.31`: zero packets on port 8883 anywhere in that capture - it never
+    even tried to dial the broker during the captured window (confirmed
+    live via `mqtt_status`: `state=unconfigured` for `.21`, but for `.31`:
+    `state=idle/retrying last_fail=RemoteBind/Connect failed` - a *third*,
+    different failure, below.
+
+### Real bug found: `app_mqtt.c` hardcoded `eth1` as the outbound interface, wrong for "Follower" boards
+
+- `.31`'s `RemoteBind/Connect failed` (never even sends a SYN) was
+  root-caused with the `stats` console command:
+  ```
+  eth0 TX: ok=409 err=0    eth0 RX: ok=422 err=0     <- the real, active link
+  eth1 TX: ok=0  err=57    eth1 RX: ok=0  err=0      <- completely dead
+  ```
+  `.31` (and presumably `.21`) is a "Follower" board with no direct
+  100BASE-T drop of its own - it reaches the LAN only by being bridged
+  through another board's T1S<->100BASE-T bridging, i.e. its real uplink is
+  eth0, not eth1. `app_mqtt.c`'s `mqtt_attempt_connect()` unconditionally
+  pinned the outbound socket to `TCPIP_STACK_NetHandleGet("eth1")` (right
+  for `.12`, the "Leader", whose bench wiring puts both interfaces on the
+  same subnet - see 2026-09-06/07 above) - on a Follower this pins the SYN
+  to hardware that was never connected in the first place.
+- **User's explicit request, implemented as asked rather than
+  auto-detected:** `mqtt_broker <ip> [port] [-i eth0|eth1]` - matches the
+  existing `ping <ip> i eth1` convention already in this codebase for the
+  same class of ambiguity. Auto-detection was deliberately not attempted:
+  link-up alone can't distinguish "wired but bridged-only" from "wired and
+  the real uplink" on this stack, so the operator states it, same as
+  `ping` already requires. `s_broker_iface[8]` (default `"eth1"`, unchanged
+  default behavior for `.12`) added to `app_mqtt.c`; `mqtt_status` now also
+  prints `if=<name>`.
+- Rebuilt, and flashed all three boards. `.21`/`.31` accepted
+  `mqtt_broker 192.168.0.100 -i eth0` and progressed into the TLS handshake
+  (confirmed via tshark: real SYN, real ClientHello, `.31` got as far as
+  `ClientKeyExchange` on one run) - the interface-selection fix itself
+  works.
+- **New, separate, NOT fixed finding:** even with the correct interface
+  pinned, connecting from a Follower is unreliable - repeated clean attempts
+  (single command, no concurrent Telnet traffic, a plain 25s wait) sometimes
+  produce a handshake reaching deep into the TLS exchange, sometimes produce
+  *zero* packets reaching the broker at all, while `ping` to the same board
+  stays at a rock-solid 0% loss throughout and `plca_stat` reports the T1S
+  link as healthy (in range, real transmit opportunities/BEACONs). Reads as
+  sporadic packet loss specific to longer/bursty TCP exchanges over the
+  bridged T1S path (a TLS handshake's Certificate message alone needs
+  several ~512-byte segments given this stack's small TCP window - more
+  round trips than a single ICMP echo, more chances to lose one) rather than
+  a software bug in the new interface-selection code. Not investigated
+  further this session - the client already redials every 10s on its own,
+  so it should eventually get through on a lucky attempt, but the
+  underlying T1S reliability question (packet loss rate under sustained TCP
+  load, not just ping) is still open.
+- **Recurrence of the 2026-09-06 DoS symptom, also NOT fixed by that
+  fix:** flashing `.21` and `.31` (this time properly via the network
+  `bootload` flow per the user's standing request, not pyOCD/SWD) failed on
+  the first attempt for both - Telnet was completely unreachable (`ping`
+  fine, `connect()` to port 23 a bare timeout, no SYN-ACK, no RST) even
+  though nothing resembling a flood attack ran against them this session,
+  just many ordinary repeated connect attempts spread over a long testing
+  window. A plain SWD reset (no reflash) was enough to recover both, after
+  which the network bootload completed normally. Since this happened AFTER
+  today's `NET_PRES_SocketDisconnect()` fix was already flashed onto these
+  exact boards, either that fix does not cover this trigger, or a related,
+  still-unidentified path can strand the TCP stack the same way. Flagged
+  for the user; not investigated further this session.
+- Reissued all three known board identities
+  (`bridge-192-168-0-{12,21,31}`) with both `serverAuth`/`clientAuth` EKU
+  and correct SKI/AKI via the now-fixed GUI dialog. `certs/bridge/` renamed
+  to `certs/default/` (clearer name now that `certs/boards/<id>/` is the
+  per-board scheme) at the user's request; comment references updated to
+  match, `docs/tls-poc-report.md`'s historical mentions of the old name left
+  alone since they describe what the directory was called when that report
+  was written. Committed as `221fe30`.
+
+---
+
+### Full-bench test campaign: a TLS session leak that bricked every TLS service
+
+- Wrote [`test-plan-telnet-mqtt-bootload.md`](test-plan-telnet-mqtt-bootload.md)
+  (7 groups, 46 cases across all three boards: Telnet/mTLS, identity
+  provisioning, bootload, MQTT, hand-patch survivability, final regression) and
+  `scripts/testplan_runner.py` to execute it and write a dated results document.
+  Four runs: **20/22 pass/fail -> 32/3 -> 42/4 -> 46/0**.
+- **Root cause of the recurring "board stops answering" defect, found this
+  session and fixed.** Reproduced deterministically: exactly 10 Telnet
+  connect/disconnect cycles, the 11th fails, and the board never recovers on
+  its own (retried at 0.2/1/2/3 s cadence - all failed from cycle 1 once
+  wedged). Ping stayed perfect throughout.
+  - Read the TCP socket table (`TCBStubs[]`, `TcpSockets`) over SWD with pyOCD
+    while wedged: **clean** - the port-23 socket still in LISTEN, all other
+    slots NULL. Read the NET_PRES pool (`sNetPresSockets[]`) the same way:
+    also clean, 1/10 in use, the listener sitting in
+    `WAITING_TO_START_NEGOTIATION`. So neither socket pool was exhausted.
+  - `meminfo` over the **serial** console (which needs no TCP, and so still
+    worked): `C-runtime heap: total=163840 largest free block=656`. wolfSSL
+    allocates via plain malloc here (`NO_WOLFSSL_MEMORY`), so that is where its
+    sessions live.
+  - Mechanism: `EncGlue_Close()` returned `NET_PRES_ENC_SS_CLOSING` while
+    waiting for the peer's `close_notify`, freeing only once the exchange
+    completed - but **nothing in `net_pres.c` ever calls `fpClose()` a second
+    time.** All three call sites invoke it once as `(void)(*fpClose)(...)`,
+    discard the status and clear `provOpen` immediately. Every client that
+    closed abruptly (i.e. essentially every real disconnect) therefore leaked
+    its whole `WOLFSSL` object plus the conn struct, ~15 KB a time. Ten
+    sessions exhausted a 160 KB heap, after which `wolfSSL_new()` could no
+    longer allocate and **every** TLS service - Telnet, bootload, cert
+    provisioning and the MQTT client alike - was dropped mid-handshake.
+  - Fix: both glue files (`net_pres_enc_glue.c`, `net_pres_enc_glue_client.c`)
+    now close single-pass - one best-effort `wolfSSL_shutdown()`, then always
+    free. Verified on hardware: **30/30 cycles**, heap flat at a 5120-byte
+    largest free block from cycle 10 through 30 (was 656 and falling), and
+    **0 unplanned resets across a full 46-case run** where previously every
+    board died after 10 connections.
+- **Two earlier conclusions corrected by this campaign:**
+  - The followers' MQTT failure was **not** sporadic T1S packet loss. A tshark
+    capture shows the broker sending FIN 2.3 ms after the client Certificate -
+    a plain certificate rejection: `.21`/`.31` still carried pre-fix
+    server-only-EKU identities. Once provisioned (group C), all three connect
+    and publish simultaneously (E5/E6/E7).
+  - The hardcoded-`eth1` diagnosis was also incomplete: `.21` reaches the
+    broker through `-i eth1` even though it has no 100BASE-TX PHY at all,
+    because the two interfaces are bridged at layer 2. The `-i` option
+    genuinely steers interface selection, but it was not the cause of the
+    failures it was introduced to fix.
+- **`mqtt_broker.py`: `broker.shutdown()` could hang indefinitely** with clients
+  connected - measured 32 s+ with three boards attached, after which the broker
+  could not be restarted (`broker already running`). The GUI's "Stop Broker"
+  button hangs the same way, since it drives the same service. Now bounded by
+  `SHUTDOWN_TIMEOUT`.
+- **Hand-patch coverage gap closed (group G).** Nothing in `patches/` protected
+  the TLS work: no patch covered `configuration.h`'s wolfSSL settings, the
+  `net_pres.c` socket-strand fix, or `initialization.c`'s provider registration
+  - not even `pProvObject_ss`, which Telnet mTLS itself depends on. A single
+  `Generate Code` would have silently disabled every TLS feature at once. Added
+  `patches/net_pres.patch`, regenerated `patches/initialization.patch` from the
+  `02595a7` baseline, and added an idempotent `apply_tls_config_fix()` handler
+  for `configuration.h` (a whole-file diff would conflict on every regenerate).
+  Verified against a simulated MCC revert: detects and repairs all three
+  violations. The project-owned glue files are now documented in
+  [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md).
+  Note: the baseline commits in `patches/README.md` (`e569c7e`, `a23af6c`, ...)
+  do not exist in this repository - they predate the split at `02595a7`.
+- **A pre-existing UsageFault was found on `.12`** during baseline collection:
+  `PC=0x00000000`, `CFSR=0x00020000` (INVSTATE - a branch to address 0, i.e. a
+  NULL function pointer), `LR` resolving to `F_DNS_Resolve`, `dns.c:677`. It
+  survives resets in Backup RAM so it may predate this session; cleared before
+  the run, and it did **not** recur across four full campaigns (F1 clean every
+  time). Left open as a watch item rather than chased.
+- Four runner defects of my own, all fixed and worth remembering: markers that
+  matched the command echo rather than the reply (hid the UsageFault entirely);
+  reusing a console session right after a long `stats` dump swallowed the next
+  reply; `board_fingerprint()` missing `ssl.OP_LEGACY_SERVER_CONNECT`, which
+  `discover.py` already needed against these boards; and counting the test
+  plan's own by-design resets as recovery resets.
 
 ---
 

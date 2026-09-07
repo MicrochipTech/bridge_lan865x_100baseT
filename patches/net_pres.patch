@@ -1,0 +1,66 @@
+diff --git a/firmware/src/config/default/net_pres/pres/src/net_pres.c b/firmware/src/config/default/net_pres/pres/src/net_pres.c
+index 90f9c61..6465846 100644
+--- a/firmware/src/config/default/net_pres/pres/src/net_pres.c
++++ b/firmware/src/config/default/net_pres/pres/src/net_pres.c
+@@ -537,28 +537,47 @@ bool NET_PRES_SocketDisconnect(NET_PRES_SKT_HANDLE_T handle)
+         pSkt->lastError = (int8_t)NET_PRES_SKT_OP_NOT_SUPPORTED;
+         return false;
+     }
+-    bool res = (*fpDiscon)(pSkt->transHandle);    
+-
+-
++    bool res = (*fpDiscon)(pSkt->transHandle);
++
++
++    /* PATCHED (docs/mqtt-tls-agent-prompt.md / DoS flood testing, 2026-09-06):
++     * this used to be `if (pSkt->status > NET_PRES_ENC_SS_WAITING_TO_START_NEGOTIATION)`,
++     * gating BOTH the fpClose() call and the status reset on the encryption
++     * status already having progressed past its initial value. That leaves a
++     * gap: whatever transient sequence of events leaves `status` at or below
++     * WAITING_TO_START_NEGOTIATION for a connection that is nonetheless being
++     * disconnected here (confirmed reachable live: a flood of rapid raw-TCP
++     * connect+abrupt-RST-close cycles - see the flood-test writeup - drove
++     * every one of this project's TLS-accepting services, sharing this one
++     * fixed NET_PRES_NUM_SOCKETS-sized pool, permanently unreachable at once,
++     * with no crash and no faultlog entry) skipped the status reset entirely.
++     * NET_PRES_Tasks()'s own per-tick pump only recognizes WAITING_TO_START_
++     * NEGOTIATION/CLIENT_NEGOTIATING/SERVER_NEGOTIATING - any other value
++     * left in `status` permanently drops this socket slot out of that loop,
++     * with no timeout and no other path back in. Unconditionally resetting
++     * `status` back to WAITING_TO_START_NEGOTIATION whenever the transport
++     * disconnect actually succeeded (res == true) guarantees this socket
++     * slot is always left in a state NET_PRES_Tasks() will keep servicing -
++     * it can only ever make MORE cleanup happen, never less: fpClose() is
++     * still separately, correctly guarded by pSkt->provOpen (the real
++     * "does this connection actually have a live provider session" fact),
++     * not by the encryption status. */
+     if(res && (pSkt->socketType & (uint16_t)NET_PRES_SKT_ENCRYPTED) == (uint16_t)NET_PRES_SKT_ENCRYPTED)
+-    {   // let the provide know that we start over
+-        if(pSkt->status > (uint8_t)NET_PRES_ENC_SS_WAITING_TO_START_NEGOTIATION)
++    {   // let the provider know that we start over
++        if(pSkt->provOpen != 0U)
+         {
+-            if(pSkt->provOpen != 0U)
++            Net_ProvConnectionClose fpClose = pSkt->provObject->fpClose;
++            if (fpClose != NULL)
+             {
+-                Net_ProvConnectionClose fpClose = pSkt->provObject->fpClose;
+-                if (fpClose != NULL)
+-                {
+-                    (void)(*fpClose)(pSkt->providerData);
+-                    pSkt->provOpen = 0U;
+-                }
++                (void)(*fpClose)(pSkt->providerData);
++                pSkt->provOpen = 0U;
+             }
+-            pSkt->status = (uint8_t)NET_PRES_ENC_SS_WAITING_TO_START_NEGOTIATION;
+         }
++        pSkt->status = (uint8_t)NET_PRES_ENC_SS_WAITING_TO_START_NEGOTIATION;
+     }
+ 
+     return res;
+-}  
++}
+ 
+ bool NET_PRES_SocketConnect(NET_PRES_SKT_HANDLE_T handle)
+ {
