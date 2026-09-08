@@ -127,6 +127,24 @@ Every board must now show its **own** fingerprint, and in the GUI its own
 `board_id` instead of `(unregistered)`. If one still shows the default
 fingerprint, it was not reset after `cert_save`.
 
+**If MQTT is in use, point each board at the broker again afterwards** - the
+client does not recover on its own. `mqtt_broker <ip> [port] [-i eth0|eth1]`
+is runtime-only anyway, so the reset in step 6 already cleared it; but even a
+board that was pointed at the broker again *before* its new identity went
+live stays stuck. Measured on the bench (2026-09-08): two boards sat at
+`state=connecting`, `last_fail=tcp/tls timeout, wolfSSL err=0` after 69 and 85
+attempts and never came out of it, while re-issuing the same `mqtt_broker`
+command connected them within seconds (`seq=4` / `seq=12`, `last_fail=(none
+yet)`). The MQTT tab's "Start MQTT Client on Selected Board" does exactly
+that, and picks the interface from the board's own discovery MAC.
+
+Why an identity swap matters here at all: toward the broker the board is the
+TLS **client**, and the compiled-in default identity carries EKU `serverAuth`
+only (`certs/default/server_cert.pem`). So MQTT cannot work before step 6 -
+`pki.py` gives a board identity both EKUs precisely for this. A board still on
+the default reports the same `tcp/tls timeout`, which is worth telling apart
+from the case above: check what `discover.py` shows for it first.
+
 ## Related
 
 - `docs/tls-poc-report.md` - why the PKI looks like this, §8/§12 for what a
