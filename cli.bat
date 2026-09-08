@@ -13,7 +13,13 @@ rem ===========================================================================
 setlocal
 
 set "PY=%~dp0.venv\Scripts\python.exe"
-if not exist "%PY%" set "PY=python"
+if not exist "%PY%" (
+    echo WARNING: no .venv in this checkout - setup.bat has not been run here.
+    echo          Falling back to "python" from PATH. Anything listed in
+    echo          scripts\requirements.txt that is missing there fails later as a
+    echo          plain ModuleNotFoundError, which looks like a broken tool but is not.
+    set "PY=python"
+)
 
 "%PY%" "%~dp0scripts\cli.py" %*
 exit /b %errorlevel%

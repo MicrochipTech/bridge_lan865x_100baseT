@@ -26,7 +26,13 @@ setlocal
 set "PROBE="
 
 set "PY=%~dp0.venv\Scripts\python.exe"
-if not exist "%PY%" set "PY=python"
+if not exist "%PY%" (
+    echo WARNING: no .venv in this checkout - setup.bat has not been run here.
+    echo          Falling back to "python" from PATH. Anything listed in
+    echo          scripts\requirements.txt that is missing there fails later as a
+    echo          plain ModuleNotFoundError, which looks like a broken tool but is not.
+    set "PY=python"
+)
 
 set "TOOL=%~dp0scripts\flash_same54.py"
 set "HEX=%~dp0release\bridge_lan865x_100baseT.hex"

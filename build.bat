@@ -19,7 +19,13 @@ rem Runs build_summary.py through this project's own .venv (created by
 rem setup.bat / batch\setup_venv.bat), falling back to the bare "python" from
 rem PATH if .venv doesn't exist yet - same pattern as flash.bat/cli.bat.
 set "PY=%SCRIPT_DIR%.venv\Scripts\python.exe"
-if not exist "%PY%" set "PY=python"
+if not exist "%PY%" (
+    echo WARNING: no .venv in this checkout - setup.bat has not been run here.
+    echo          Falling back to "python" from PATH. Anything listed in
+    echo          scripts\requirements.txt that is missing there fails later as a
+    echo          plain ModuleNotFoundError, which looks like a broken tool but is not.
+    set "PY=python"
+)
 set "MPLAB_DIR=%SCRIPT_DIR%firmware\tcpip_iperf_lan865x.X"
 set "PROJ_NAME=tcpip_iperf_lan865x"
 set "CONF=default"

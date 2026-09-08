@@ -45,10 +45,25 @@ import ssl
 # progress callback and a window. Same directory as this script, which Python puts
 # on sys.path for the script it runs, so a plain import is enough.
 import bootload
-import pki
-import cert_provision
 import discover
-import mqtt_broker
+
+# bootload/discover are stdlib-only, but these three pull third-party packages
+# in turn: pki and cert_provision need `cryptography`, mqtt_broker needs
+# `amqtt`. Unguarded, a checkout where setup.bat has not run dies right here
+# with a bare ModuleNotFoundError at module load - BEFORE main()'s dep_check
+# can notice anything or offer to install it. That is exactly how a fresh clone
+# failed (2026-09-08: "No module named 'amqtt'", on a machine whose global
+# Python happened to have sv-ttk and cryptography but not amqtt, so the
+# launcher's fallback to the bare `python` looked like it should have worked).
+# Guarded, the module still loads and dep_check does its job; all three
+# packages are listed as HARD dependencies there, so the GUI never actually
+# reaches its first window with one of these left at None.
+try:
+    import pki
+    import cert_provision
+    import mqtt_broker
+except ImportError:
+    pki = cert_provision = mqtt_broker = None
 
 try:
     import serial
@@ -2030,7 +2045,15 @@ class BridgeGUITelnet:
         self.mqtt_start_button = ttk.Button(top, text="Start Broker", command=self.mqtt_start_broker)
         self.mqtt_start_button.grid(row=0, column=4, padx=(0, 4))
         self.mqtt_stop_button = ttk.Button(top, text="Stop Broker", command=self.mqtt_stop_broker, state=tk.DISABLED)
-        self.mqtt_stop_button.grid(row=0, column=5)
+        self.mqtt_stop_button.grid(row=0, column=5, padx=(0, 12))
+        # certs/mqtt/ is generated per checkout, not shipped (see
+        # docs/pki-clean-start.md), so on a fresh clone the first "Start
+        # Broker" fails on a missing identity. Making that a button here
+        # rather than only an error message pointing at pki.py's CLI - this
+        # tab is where someone hits the problem.
+        self.mqtt_identity_button = ttk.Button(top, text="Create Broker Identity",
+                                               command=self.mqtt_create_identity)
+        self.mqtt_identity_button.grid(row=0, column=6)
 
         self.mqtt_status_var = tk.StringVar(value="stopped")
         ttk.Label(top, textvariable=self.mqtt_status_var, foreground="blue").grid(
@@ -2068,6 +2091,32 @@ class BridgeGUITelnet:
         self.mqtt_log.insert(tk.END, "[%s] %s\n" % (time.strftime("%H:%M:%S"), text))
         self.mqtt_log.see(tk.END)
         self.mqtt_log.config(state=tk.DISABLED)
+
+    def mqtt_create_identity(self):
+        """The broker's own TLS server identity (certs/mqtt/), signed by the
+        project CA - which is why nothing has to change on the boards
+        afterwards: they already trust that CA, so they verify this
+        certificate with the firmware they are running. Not shipped in the
+        repo, so a fresh checkout needs this once."""
+        try:
+            if not pki.ca_exists():
+                messagebox.showwarning(
+                    "No CA", "No project CA at %s - see the Certificates tab." % pki.CA_CERT_PATH)
+                return
+            if pki.MQTT_BROKER_CERT_PATH.is_file():
+                if not messagebox.askyesno(
+                        "Replace broker identity?",
+                        "A broker identity already exists (%s).\n\n"
+                        "Replace it? A running broker keeps the old one until it is "
+                        "restarted; boards need no change either way, they verify it "
+                        "against the CA." % pki.MQTT_BROKER_CERT_PATH):
+                    return
+            cert, _ = pki.issue_mqtt_broker_identity(force=True)
+            self._mqtt_log("Broker identity: %s" % pki.MQTT_BROKER_CERT_PATH)
+            self._mqtt_log("  fingerprint: %s" % pki.fingerprint(cert))
+            self._mqtt_log("Ready - \"Start Broker\" now works.")
+        except pki.PkiError as e:
+            messagebox.showerror("MQTT", str(e))
 
     def mqtt_start_broker(self):
         bind_ip = self.mqtt_bind_var.get().strip() or mqtt_broker.DEFAULT_BIND_IP
@@ -2889,7 +2938,18 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     self.mqtt_status_var.set("stopped")
                     self.mqtt_start_button.config(state=tk.NORMAL)
                     self._mqtt_log("ERROR: %s" % error)
-                    messagebox.showerror("MQTT", "Broker failed to start:\n%s" % error)
+                    # mqtt_broker.py is GUI-free and names its CLI fix, which is
+                    # right there but wrong here - offer the button's action
+                    # instead of sending someone to a shell for one command.
+                    if not pki.MQTT_BROKER_CERT_PATH.is_file():
+                        if messagebox.askyesno(
+                                "MQTT",
+                                "The broker has no TLS identity of its own yet "
+                                "(%s).\n\nCreate it now? Signed by the project CA, so the "
+                                "boards need no change." % pki.MQTT_BROKER_CERT_PATH):
+                            self.mqtt_create_identity()
+                    else:
+                        messagebox.showerror("MQTT", "Broker failed to start:\n%s" % error)
 
                 elif result[0] == "discover_results":
                     _, rows, _source = result
@@ -3519,8 +3579,15 @@ def main():
     args = ap.parse_args()
 
     import dep_check
+    # cryptography (Certificates tab, via pki) and amqtt (MQTT tab, via
+    # mqtt_broker) are as hard a requirement as the theme: both tabs are built
+    # unconditionally, so "continue anyway" would only move the crash. See the
+    # guarded import block at the top of this file for why they cannot simply
+    # be imported here.
     if not dep_check.ensure_dependencies(
-            hard=[("sv_ttk", "sv-ttk")], optional=[("serial", "pyserial")]):
+            hard=[("sv_ttk", "sv-ttk"), ("cryptography", "cryptography"),
+                  ("amqtt", "amqtt")],
+            optional=[("serial", "pyserial")]):
         sys.exit(0)
     import sv_ttk
 
