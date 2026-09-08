@@ -371,6 +371,14 @@ security-related.
 
 ## 5. The crypto hardware this build does not use
 
+> **Superseded on 2026-09-08 for RSA:** the PUKCC described below is now
+> actually used for the TLS server role's RSA private-key operation. Handshake
+> 1.15 s -> 0.91 s, longest blocking call 746 ms -> 519 ms, raw private
+> operation 454 ms -> 227 ms. What was built, what broke, and what is still
+> left on software: `docs/pukcc-acceleration-plan.md` §8. The rest of this
+> chapter is unchanged and still describes AES, ICM and TRNG, which remain
+> unused.
+
 The measurements above are all of *software* crypto. The part underneath has
 four crypto blocks, and this firmware touches none of them. From the device
 header (`packs/ATSAME54P20A_DFP/same54p20a.h`):
@@ -473,9 +481,11 @@ Roughly in order of return per unit of risk:
    instrument wolfSSL's allocations first (§3.3 box). Do not cut this one on
    arithmetic alone.
 6. **The 745 ms handshake stall** is not a memory problem but it is the
-   sharpest edge here. In order of expected return: hand the modular
-   exponentiation to the **PUKCC** the part already has and this build
-   ignores (§5) - the wolfSSL crypto-callback framework and the PUKCL port are
+   sharpest edge here. **Partly done** (2026-09-08): the modular exponentiation
+   now runs on the PUKCC for the server role - 519 ms, and 227 ms for the raw
+   operation. The remaining 4x is the vendored driver's non-CRT private path;
+   see `pukcc-acceleration-plan.md` §8.4. Original options were: hand the
+   modular exponentiation to the **PUKCC** the part already has (§5) - the wolfSSL crypto-callback framework and the PUKCL port are
    both already in the tree; or use a smaller key (ECDSA P-256 instead of
    RSA-2048 - `ecc.o` is already linked, and PUKCC does ECDSA too); or accept
    it and keep every timeout in the system above it, which is what the

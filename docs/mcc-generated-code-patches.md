@@ -950,6 +950,34 @@ line in the boot log; the check is `help`, which lists the groups that made it.
 
 ---
 
+## 16. `net_pres\pres
+et_pres_enc_glue.c` — RSA to the PUKCC (`SetDevId`)
+
+**What MCC generates:** a TLS server context that never mentions a crypto
+device, so wolfSSL does every RSA operation in software.
+
+**What the patch changes:** one line after `wolfSSL_CTX_new()` -
+`wolfSSL_CTX_SetDevId(s_ctx, PUKCC_DevId())` - plus the `#include "pukcc.h"`
+for it. `PUKCC_DevId()` returns the devId Microchip's vendored PUKCL driver is
+registered under, or `INVALID_DEVID` if the accelerator did not come up.
+
+**Why:** the software RSA private-key operation is a single uninterruptible
+745 ms call that stalls the whole round-robin loop once per TLS connection
+(`docs/resource-cost-tls-mqtt.md` §4.2). With the accelerator it is 519 ms, and
+the whole handshake drops from 1.15 s to 0.91 s measured from the PC. See
+`docs/pukcc-acceleration-plan.md` §8 for the full result.
+
+**Deliberately NOT applied to `net_pres_enc_glue_client.c`.** The same line on
+the MQTT client's context stops that client from ever completing a handshake
+(`RSA_PAD_E`, then `BAD_FUNC_ARG`, while unmodified boards connected to the
+same broker). That file carries a comment saying so; do not "fix the
+inconsistency" by adding it.
+
+**If the patch is lost:** nothing breaks and nothing says so - TLS keeps
+working, one third slower per connection. `pukcc_status` on the board is the
+check: "private RSA ... done in hardware" stays at 0 if the devId never
+reached the context.
+
 ## Project-owned files that live under `config\default\` but are NOT MCC output
 
 Three files sit inside the generated tree yet were written by this project and

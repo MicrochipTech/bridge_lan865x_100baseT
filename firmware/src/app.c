@@ -45,6 +45,7 @@
 #include "testserver.h"
 #include "bootload.h"
 #include "cert_provision.h"
+#include "pukcc.h"
 #include "app_mqtt.h"
 #include "crashlog.h"
 #include "cpuload.h"
@@ -873,6 +874,7 @@ void APP_Initialize ( void )
     NOIP_Initialize();
     TESTSERVER_Initialize();
     BOOTLOAD_Initialize();
+    PUKCC_Initialize();            /* before the first TLS handshake wants an RSA private-key op */
     CERT_PROVISION_Initialize();   /* before any TLS socket can possibly be opened - see cert_provision.c */
     MQTT_Initialize();
     /* MIRROR_Initialize() is deferred to APP_STATE_SERVICE_TASKS, NOT called here:

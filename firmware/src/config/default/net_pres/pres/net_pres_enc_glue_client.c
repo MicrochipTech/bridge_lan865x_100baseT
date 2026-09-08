@@ -130,6 +130,20 @@ static bool EncGlueClient_Init(struct S_NET_PRES_TransportObject *transObject)
     wolfSSL_CTX_SetIORecv(s_ctx, EncGlueClient_IoRecv);
     wolfSSL_CTX_SetIOSend(s_ctx, EncGlueClient_IoSend);
 
+    /* HAND-PATCH (2026-09-08): this context deliberately does NOT get the
+       PUKCC devId, unlike the server context in net_pres_enc_glue.c.
+       Measured, not assumed: with wolfSSL_CTX_SetDevId(s_ctx, PUKCC_DevId())
+       here, the MQTT client never completed a handshake with the broker -
+       first RSA_PAD_E (-201), then BAD_FUNC_ARG (-173) - while two boards on
+       the unmodified firmware connected to the same broker in the same
+       minute. The counters in pukcc.c show the failing attempts perform no
+       hardware RSA at all, so the fault is in what setting a devId changes
+       about this client role, not in the accelerator's arithmetic. Unresolved
+       on purpose rather than papered over: the server role is where the
+       745 ms stall lives (docs/resource-cost-tls-mqtt.md sec.4.2) and it is
+       measurably faster now, while this role keeps working exactly as before.
+       See docs/pukcc-acceleration-plan.md for what to investigate next. */
+
     /* This board's own identity for the mTLS handshake with the broker -
        deliberately the SAME cert/key cert_provision.c already manages for
        this board's TLS *server* role (Telnet/bootload), not a separate

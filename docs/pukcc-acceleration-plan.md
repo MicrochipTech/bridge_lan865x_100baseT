@@ -1,4 +1,11 @@
-# Implementation plan: offload RSA to the PUKCC
+# Offloading RSA to the PUKCC - plan, and what came of it
+
+> **Status: built and measured on 2026-09-08** (branch `pukcc-rsa-offload`).
+> Results, including the two things that went wrong, are in
+> [chapter 8](#8-what-actually-happened) at the end. The plan above it is left
+> as it was written, because the differences between it and the outcome are
+> the useful part.
+
 
 Goal: stop doing RSA-2048 in software. The measured cost today is **139 M
 cycles (1.16 s of CPU) per mutual-TLS handshake, of which a single
@@ -207,3 +214,92 @@ is in flux. One commit per stage, each independently revertible:
   [API §43.3.1](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-8D532BF9-2B97-4A52-AEB7-33EDA9490E02.html),
   [init + self-test §43.3.3.1](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-7C82F552-E5A2-4284-AC7B-EB861635D1B4.html),
   [timings and stack usage §43.3.8](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-2CF0C526-FE9E-4BE9-BEA2-C192956C7507.html).
+
+---
+
+## 8. What actually happened
+
+### 8.1 The plan survived contact, with three corrections
+
+**Microchip's PUKCL driver was already in the tree, and already compiled.**
+`third_party/wolfssl/.../wolfcrypt/src/port/pic32/crypt_rsa_pukcl.c` and
+`crypt_wolfcryptcb.c` were being built into every image, switched off behind
+`WOLFSSL_HAVE_MCHP_HW_RSA` and `WOLFSSL_HAVE_MCHP_HW_CRYPTO_RSA_HW_PUKCC`.
+The plan's stage 1 - a hand-written CRT sequence - was written before that was
+noticed. It did get built and run first, and it is the reason the vector check
+in stage 1 was not optional: **it ran at 51.8 ms against software's 745 ms and
+returned a wrong answer.** The CRT service does not compute the R value
+itself; the vendor driver runs a GCD service for R and two Div services for
+EP/EQ first. That code was deleted rather than finished - duplicating a vendor
+implementation of the same algorithm was not worth it.
+
+**The two defines are set in `nbproject/configurations.xml`, not in
+`configuration.h`.** MCC owns the latter; a regeneration would have switched
+the accelerator back off silently.
+
+**Registering the crypto callback at init does not work.** `wolfSSL_Init()`
+calls `wolfCrypt_Init()`, which calls `wc_CryptoCb_Init()`, and that sets
+*every* entry in the callback table back to `INVALID_DEVID`. A registration
+done in `APP_Initialize()` is gone by the time the first TLS context exists,
+and the symptom is indistinguishable from "the accelerator does not help":
+every RSA still ran in software, at exactly the software speed, with the
+callback never entered. `PUKCC_DevId()` now (re-)registers on every call, and
+callers ask for it right after `wolfSSL_Init()`. The counters that made this
+visible - calls / private RSA / done in hardware - are in `pukcc_status` and
+are the reason it took minutes instead of a day.
+
+### 8.2 Measured result
+
+Same bench, same afternoon: 192.168.0.12 running the accelerated firmware,
+192.168.0.21 and .31 left on the previous image as controls.
+
+| | software (`.21` / `.31`) | PUKCC (`.12`) | change |
+|---|---:|---:|---:|
+| Full mutual-TLS handshake, wall clock from the PC (median of 8) | 1.151 s / 1.133 s | **0.909 s** | **-21 %** |
+| CPU per handshake (`cpuload`, `net_pres` slot) | 91.1 M cycles | **72.2 M cycles** | **-21 %** |
+| Longest single blocking call | 746 ms | **519 ms** | **-30 %** |
+| Raw RSA-2048 private operation (`pukcc_bench`) | 454.4 ms | **226.6 ms** | **-50 %** |
+
+All handshakes succeeded (8/8 per board), and every result was verified
+against the fixed vector, not just timed.
+
+**Why only 2x on the operation itself:** the vendored driver performs the
+private operation with `MODE_NO_CRT` - the full private exponent against the
+modulus - even though wolfSSL's key carries p, q, dP, dQ. The CRT service the
+driver uses elsewhere is roughly 4x faster again; the abandoned hand-written
+CRT measured 51.8 ms. Teaching `Crypt_RSA_PrivateEncrypt()` to use the CRT
+path it already contains is the obvious next lever, and it is worth more than
+everything else left on this list.
+
+### 8.3 What is deliberately left on software
+
+**The MQTT client context.** Giving `net_pres_enc_glue_client.c`'s context the
+same devId broke it: the client never completed a handshake with the broker -
+first `RSA_PAD_E` (-201), then `BAD_FUNC_ARG` (-173) - while the two control
+boards connected to the same broker in the same minute. The counters show the
+failing attempts perform **no hardware RSA at all**, so this is not the
+accelerator's arithmetic; it is something about what a devId changes in the
+client role. The server context - Telnet, bootload, cert provisioning, which
+is where the 745 ms stall lives - keeps the accelerator; the client context
+does not. Unresolved rather than papered over.
+
+**Public RSA operations.** The callback declines them, and that restriction is
+a measured bug fence rather than caution: handing the vendored driver public
+operations produced `RSA_PAD_E`, i.e. a wrong result, and wedged the board's
+TLS server in the fallout. There is also nothing to win - e = 65537 costs
+single-digit milliseconds in software. The likely defect is visible in the
+vendor source: its public paths copy out `*(info->pk.rsa.outLen)` bytes for a
+value the caller has not sized yet, and every path reads `info->rng.rng`,
+which is a different arm of the `wc_CryptoInfo` union than the one in use and
+aliases `info->pk.type` rather than any real RNG.
+
+### 8.4 Where to pick this up
+
+1. **CRT for the private operation** - 4x on top of what is already there.
+   Either patch `Crypt_RSA_PrivateEncrypt()` to pass p/q/dP/dQ and
+   `MODE_CRT`, or finish the hand-written sequence (Fill, GCD for R, two Div
+   for EP/EQ, then CRT) that this branch deleted.
+2. **The MQTT client context** - find what setting a devId changes for a
+   wolfSSL client that does not apply to a server, and re-enable it.
+3. **The union bug in the vendor driver** - worth reporting upstream; fixing
+   it locally would also re-open the public-operation path.

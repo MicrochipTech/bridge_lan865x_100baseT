@@ -33,6 +33,7 @@
 
 #include "wolfssl/ssl.h"
 #include "cert_provision.h"
+#include "pukcc.h"           /* HAND-PATCH: PUKCC_DevId() - see below */
 #include "config/default/system/time/sys_time.h"   /* SYS_TIME_Counter64Get/FrequencyGet - ENC_CLOSE_TIMEOUT_MS */
 
 /* How long EncGlue_Close() waits for a peer to complete wolfSSL_shutdown()'s
@@ -136,6 +137,16 @@ static bool EncGlue_Init(struct S_NET_PRES_TransportObject *transObject)
 
     wolfSSL_CTX_SetIORecv(s_ctx, EncGlue_IoRecv);
     wolfSSL_CTX_SetIOSend(s_ctx, EncGlue_IoSend);
+
+    /* HAND-PATCH (2026-09-08): hand this context's RSA private-key operations
+       to the PUKCC. PUKCC_DevId() returns the devId Microchip's vendored PUKCL
+       driver registered under (crypt_wolfcryptcb.c), or INVALID_DEVID when the
+       accelerator did not come up - in which case this line changes nothing
+       and wolfSSL keeps doing RSA in software. Measured reason for existing:
+       the software private-key op is a single 745 ms call that stalls the
+       whole round-robin loop, see docs/resource-cost-tls-mqtt.md sec.4.2.
+       Re-apply after any MCC regeneration - see docs/mcc-generated-code-patches.md. */
+    (void)wolfSSL_CTX_SetDevId(s_ctx, PUKCC_DevId());
 
     /* This project's own CA/server cert+key, not wolfSSL's test PKI - either
        the compiled-in default (bridge_certs.h) or an EEPROM override pushed
