@@ -496,6 +496,17 @@ from the tracked `nbproject\configurations.xml` via MPLAB X's own
 `prjMakefilesGenerator.bat`. `build.bat` calls it automatically if the
 fragments are missing.
 
+**TLS identities are not part of the checkout.** The Telnet console, the
+network bootloader and the certificate provisioning channel all require a
+client certificate from the project CA, and only the *default* identity ships
+with the repo (`certs\default\`, compiled into `firmware\src\bridge_certs.h`,
+which is what every freshly flashed board runs). The operator identity
+(`certs\client\`) and one identity per board (`certs\boards\<id>\`,
+`json\boards\<id>.json`) are generated locally and pushed onto the boards -
+never committed, since a board identity is that board's private key. The full
+procedure, from an empty checkout to a provisioned bench, is
+**[docs\pki-clean-start.md](docs/pki-clean-start.md)**.
+
 ### 5.3 Build and flash
 
 ```bat

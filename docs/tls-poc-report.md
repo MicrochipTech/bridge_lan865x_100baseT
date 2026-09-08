@@ -531,6 +531,14 @@ keypair, signs a leaf certificate against the CA, and writes
 IP, PEM/DER paths, a `provisioned` flag) - one JSON file per board, so a
 fleet of boards is just a directory listing.
 
+None of that is in git. The repo carries only the **default** identity
+(`certs/default/`, compiled into `bridge_certs.h`) and the CA; `certs/boards/`,
+`json/boards/`, `certs/client/` and `certs/mqtt/` are created per checkout and
+gitignored, because a committed board identity would hand every clone of this
+repo that board's private key. `pki.py delete-all-boards` and the GUI's "Delete
+ALL Identities..." get a used bench back to that empty state - the starting
+point of the procedure in [`pki-clean-start.md`](pki-clean-start.md).
+
 **`firmware/src/cert_provision.c`/`.h`** - the on-device receiver. Adds a
 `cert` command group (`cert_arm`, `cert_show`, `cert_save`, `cert_reset`,
 `cert_abort`) alongside a small binary data port (5568, same

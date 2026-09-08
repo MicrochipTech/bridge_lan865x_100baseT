@@ -23,6 +23,7 @@ project was built, why particular decisions were made, and what was measured.
 | see the firmware running on a board that has no 100BASE-TX PHY | [`three-board-rollout-report.md`](three-board-rollout-report.md) |
 | debug a board live with pyOCD (breakpoints, fault postmortems, recovery resets) | [`pyocd-agent-debugging-guide.md`](pyocd-agent-debugging-guide.md) |
 | flash a board over the network instead of with a debug probe | [`bootload-agent-flashing-guide.md`](bootload-agent-flashing-guide.md) |
+| set up TLS on a fresh checkout, or start a bench over: which certificates exist, which have to be created and pushed | [`pki-clean-start.md`](pki-clean-start.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
 
@@ -117,6 +118,17 @@ mechanism instead of a debug probe: the `bootload.py` command and what a healthy
 run looks like, what a wedged board's Telnet-connect failure means and how to
 recover it (a plain SWD reset, not a flash), and why this path is preferred over
 `flash.bat`/pyOCD whenever a board is network-reachable.
+
+### [`pki-clean-start.md`](pki-clean-start.md) — from a fresh checkout to a provisioned bench
+*Read this before wondering why the TLS tools do not work on a new clone.* Which
+certificates the repo actually contains (only the default identity, plus the CA
+as documented bring-up material) and which are created locally and never
+committed — the operator identity and one private key per board. Then the
+seven-step procedure: delete every board identity, flash all targets back onto
+the compiled-in default, create the operator identity, discover the boards,
+issue one identity each, push them, verify. Includes what flashing alone does
+*not* reset (the identity saved in emulated EEPROM) and why the CA private key
+is deliberately still tracked.
 
 ### [`session-log.md`](session-log.md) — chronological bring-up record
 *2406 lines, by far the largest document here.* Every step of the bring-up in

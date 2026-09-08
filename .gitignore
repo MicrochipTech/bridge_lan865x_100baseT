@@ -48,3 +48,19 @@ docs/sniffer_capture_results.log
 # prove that a foreign-CA client certificate is rejected. Regenerated on
 # demand; never a trusted part of the project's PKI (that lives in certs\).
 scripts/_testplan_scratch/
+
+# Locally generated PKI material (scripts\pki.py). Only the DEFAULT identity
+# is part of the repo: certs\default\ and its compiled form
+# firmware\src\bridge_certs.h, which every board runs until an individual
+# identity is pushed to it, plus certs\ca\ (still bring-up material - see
+# docs\pki-clean-start.md and docs\tls-poc-report.md sec.12 for why the CA key
+# being here is a deliberate, documented compromise).
+#
+# Everything below is created per checkout and per bench and must never be
+# committed: a board identity is one board's private key, and a checked-in one
+# would silently make every clone of this repo able to impersonate that board.
+# docs\pki-clean-start.md is the procedure that recreates all of it.
+certs/boards/
+certs/client/
+certs/mqtt/
+json/boards/

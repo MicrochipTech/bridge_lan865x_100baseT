@@ -1673,7 +1673,12 @@ class BridgeGUITelnet:
 
         ca_frame = ttk.LabelFrame(right, text="Certificate Authority", padding=5)
         ca_frame.pack(fill=tk.X, pady=(0, 5))
-        ttk.Button(ca_frame, text="CA Status", command=self.cert_ca_status).pack(fill=tk.X)
+        ttk.Button(ca_frame, text="CA Status", command=self.cert_ca_status).pack(fill=tk.X, pady=1)
+        # certs/client/ is generated per checkout, not shipped in the repo
+        # (docs/pki-clean-start.md), so a fresh clone needs a way to make it
+        # that isn't "go read pki.py's CLI".
+        ttk.Button(ca_frame, text="Create Operator Client Identity",
+                  command=self.cert_issue_client).pack(fill=tk.X, pady=1)
 
         board_frame = ttk.LabelFrame(right, text="Board identities", padding=5)
         board_frame.pack(fill=tk.X, pady=(0, 5))
@@ -1682,6 +1687,13 @@ class BridgeGUITelnet:
                   command=self.cert_issue_board_dialog).pack(fill=tk.X, pady=1)
         ttk.Button(board_frame, text="Open certs/boards/<id> folder",
                   command=self.cert_open_selected_folder).pack(fill=tk.X, pady=1)
+        ttk.Button(board_frame, text="Delete Selected Identity",
+                  command=self.cert_delete_selected).pack(fill=tk.X, pady=1)
+        # Step 1 of a clean start (docs/pki-clean-start.md) - a fresh clone
+        # has no board identities at all, and a bench that is being started
+        # over has to get back to that state before anything is reissued.
+        ttk.Button(board_frame, text="Delete ALL Identities...",
+                  command=self.cert_delete_all).pack(fill=tk.X, pady=1)
 
         device_frame = ttk.LabelFrame(right, text="Selected device (ip/user/password above)", padding=5)
         device_frame.pack(fill=tk.X, pady=(0, 5))
@@ -1740,8 +1752,15 @@ class BridgeGUITelnet:
             return
         self.discover_tree.delete(*self.discover_tree.get_children())
         self.cert_scan_button.config(state=tk.DISABLED, text="Discovering...")
-        self._cert_log("Broadcasting on %s.255, then TLS-probing every answer..."
-                       % ".".join(base_ip.split(".")[:3]))
+        if discover.operator_identity_ready():
+            self._cert_log("Broadcasting on %s.255, then TLS-probing every answer..."
+                           % ".".join(base_ip.split(".")[:3]))
+        else:
+            # Fresh checkout: no certs/client/ yet, so the fingerprint column
+            # would be empty for every board with no way to tell why.
+            self._cert_log("Broadcasting on %s.255 (no operator client identity yet - "
+                           "fingerprints stay empty until \"Create Operator Client "
+                           "Identity\")" % ".".join(base_ip.split(".")[:3]))
 
         def worker():
             try:
@@ -1794,6 +1813,30 @@ class BridgeGUITelnet:
         except pki.PkiError as e:
             messagebox.showerror("PKI error", str(e))
 
+    def cert_issue_client(self):
+        """The operator identity every host-side tool presents (this GUI,
+        bootload.py, discover.py's TLS probe). Generated per checkout, not
+        shipped - see docs/pki-clean-start.md. Replacing it is harmless as
+        long as the CA stays the same: the boards trust the CA, not this
+        leaf, so nothing has to be reprovisioned."""
+        try:
+            if not pki.ca_exists():
+                messagebox.showwarning("No CA", "Create the CA first (CA Status).")
+                return
+            if pki.CLIENT_CERT_PATH.is_file():
+                if not messagebox.askyesno(
+                        "Replace client identity?",
+                        "An operator client identity already exists (%s).\n\n"
+                        "Replace it? Boards keep working without reprovisioning - they trust "
+                        "the CA, not this particular certificate."
+                        % pki.CLIENT_CERT_PATH):
+                    return
+            cert, _ = pki.issue_client_identity(force=True)
+            self._cert_log("Operator client identity: %s" % pki.CLIENT_CERT_PATH)
+            self._cert_log("  fingerprint: %s" % pki.fingerprint(cert))
+        except pki.PkiError as e:
+            messagebox.showerror("PKI error", str(e))
+
     def cert_issue_board_dialog(self):
         if not pki.ca_exists():
             messagebox.showwarning("No CA", "Create the CA first (Certificate Authority > CA Status).")
@@ -1833,6 +1876,51 @@ class BridgeGUITelnet:
             messagebox.showerror("Not found", str(path))
             return
         os.startfile(str(path))  # noqa: this GUI is Windows-only (sv-ttk Windows 11 theme)
+
+    def cert_delete_selected(self):
+        """Host-side only: drops this board's json record and key material.
+        The board itself keeps whatever it has saved in EEPROM until someone
+        runs 'cert_reset' + 'reset' on it - said plainly in the dialog,
+        because "deleted here" and "back to the default identity out there"
+        are two different things."""
+        sel = self.cert_tree.selection()
+        if not sel:
+            messagebox.showinfo("No selection", "Select a board in the list first.")
+            return
+        board_id = sel[0]
+        if not messagebox.askyesno(
+                "Delete identity?",
+                "Delete the host-side identity for %s?\n\n"
+                "Removes json/boards/%s.json and certs/boards/%s/ (its private key). "
+                "This cannot be undone - the certificate would have to be reissued.\n\n"
+                "The board itself keeps the identity saved in its EEPROM until you run "
+                "\"Reset Device to Compiled-In Default Identity\" on it."
+                % (board_id, board_id, board_id)):
+            return
+        pki.delete_board(board_id)
+        self._cert_log("Deleted host-side identity: %s" % board_id)
+        self.cert_refresh_boards()
+
+    def cert_delete_all(self):
+        """Step 1 of the clean start in docs/pki-clean-start.md."""
+        boards = pki.list_boards()
+        if not boards:
+            messagebox.showinfo("Nothing to delete", "No board identities are known.")
+            return
+        if not messagebox.askyesno(
+                "Delete ALL identities?",
+                "Delete the host-side identities of all %d known board%s?\n\n"
+                "Empties json/boards/ and certs/boards/, private keys included. This cannot "
+                "be undone.\n\n"
+                "The CA, the operator client identity and the MQTT broker identity are kept - "
+                "only boards are removed. Each board keeps what is saved in its own EEPROM "
+                "until it is reset to the compiled-in default identity."
+                % (len(boards), "" if len(boards) == 1 else "s")):
+            return
+        gone = pki.delete_all_boards()
+        self._cert_log("Deleted %d host-side board identit%s"
+                       % (len(gone), "y" if len(gone) == 1 else "ies"))
+        self.cert_refresh_boards()
 
     def _cert_selected_board_id(self):
         sel = self.cert_tree.selection()

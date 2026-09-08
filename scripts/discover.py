@@ -227,6 +227,17 @@ def _probe(ip: str, timeout: float = TLS_TIMEOUT):
     return {"ip": ip, "fingerprint_sha256": fp}, True
 
 
+def operator_identity_ready() -> bool:
+    """Whether this checkout has the operator side of the mutual-TLS
+    handshake at all. A fresh clone does NOT: certs/client/ is generated
+    locally and deliberately not in the repo (docs/pki-clean-start.md), so
+    every handshake would fail for a reason that has nothing to do with the
+    boards. Checked so that case can be reported as itself instead of as 254
+    (or three) unexplained failures."""
+    return (TLS_CA_CERT.is_file() and TLS_CLIENT_CERT.is_file()
+            and TLS_CLIENT_KEY.is_file())
+
+
 def discover_boards(base_ip: str, timeout: float = 1.0, progress=None):
     """The normal way to find boards: broadcast first, then talk TLS only to
     what actually answered. Returns a list of {"ip", "mac",
@@ -249,9 +260,12 @@ def discover_boards(base_ip: str, timeout: float = 1.0, progress=None):
     the handful of boards a bench has, serial is both fast enough and the
     variant that never loses one."""
     boards = broadcast_discover(base_ip, timeout=timeout)
+    have_identity = operator_identity_ready()
     results = []
     for done, b in enumerate(boards, 1):
-        probe, _tcp_ok = _probe(b["ip"], timeout=RETRY_TLS_TIMEOUT)
+        probe = None
+        if have_identity:   # otherwise every handshake fails for our reason, not theirs
+            probe, _tcp_ok = _probe(b["ip"], timeout=RETRY_TLS_TIMEOUT)
         results.append({"ip": b["ip"], "mac": b["mac"],
                         "fingerprint_sha256": probe["fingerprint_sha256"] if probe else None})
         if progress:

@@ -39,6 +39,7 @@ intent.
 import datetime
 import ipaddress
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -293,6 +294,45 @@ def board_info(board_id: str) -> Optional[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def delete_board(board_id: str) -> bool:
+    """Forget one board: its json/boards/<id>.json record and its
+    certs/boards/<id>/ key material. Returns False if there was nothing to
+    delete. Purely host-side - the board itself keeps whatever identity is
+    saved in its EEPROM until someone runs 'cert_reset' + 'reset' on it (see
+    docs/pki-clean-start.md, which is the reason this exists: starting from
+    a clean checkout means the host's list of boards has to be emptied
+    first, so nothing here claims to know a board it can no longer prove
+    anything about)."""
+    removed = False
+    path = _board_json_path(board_id)
+    if path.is_file():
+        path.unlink()
+        removed = True
+    cert_dir = _board_cert_dir(board_id)
+    if cert_dir.is_dir():
+        shutil.rmtree(cert_dir)
+        removed = True
+    return removed
+
+
+def delete_all_boards() -> list:
+    """Forget every board (see delete_board()). Returns the board_ids that
+    were removed. Leaves the CA, the client identity and the MQTT broker
+    identity alone - those are not boards."""
+    gone = []
+    for b in list_boards():
+        if delete_board(b["board_id"]):
+            gone.append(b["board_id"])
+    # Also sweep certs/boards/<id>/ directories with no json record left -
+    # a half-deleted state, or an identity issued before the json existed.
+    if BOARDS_CERT_DIR.is_dir():
+        for d in sorted(BOARDS_CERT_DIR.iterdir()):
+            if d.is_dir():
+                shutil.rmtree(d)
+                gone.append(d.name)
+    return gone
+
+
 def issue_board_identity(board_id: str, ip: str = "", probe_serial: str = "",
                           force: bool = False) -> dict:
     """Generate a fresh RSA-2048 keypair + leaf certificate for ONE board,
@@ -384,6 +424,18 @@ if __name__ == "__main__":
 
     sub.add_parser("list-boards")
 
+    p = sub.add_parser("issue-client")
+    p.add_argument("--force", action="store_true")
+
+    p = sub.add_parser("delete-board")
+    p.add_argument("board_id")
+
+    # Deliberately spelled out rather than a --all flag on delete-board: this
+    # is the first step of a clean start (docs/pki-clean-start.md) and should
+    # be hard to type by accident.
+    p = sub.add_parser("delete-all-boards")
+    p.add_argument("--yes", action="store_true", help="required - confirms the deletion")
+
     p = sub.add_parser("issue-mqtt-broker")
     p.add_argument("--force", action="store_true")
 
@@ -403,6 +455,21 @@ if __name__ == "__main__":
     elif args.cmd == "list-boards":
         for b in list_boards():
             print("%-20s %-16s %s" % (b["board_id"], b.get("ip", ""), b["fingerprint_sha256"]))
+    elif args.cmd == "issue-client":
+        cert, _ = issue_client_identity(force=args.force)
+        print("client identity:", CLIENT_CERT_PATH)
+        print("  fingerprint:", fingerprint(cert))
+    elif args.cmd == "delete-board":
+        print("deleted" if delete_board(args.board_id) else "nothing to delete for",
+              args.board_id)
+    elif args.cmd == "delete-all-boards":
+        if not args.yes:
+            raise SystemExit("refusing without --yes: this deletes every board identity "
+                             "under certs/boards/ and json/boards/")
+        gone = delete_all_boards()
+        print("deleted %d board identit%s" % (len(gone), "y" if len(gone) == 1 else "ies"))
+        for board_id in gone:
+            print(" ", board_id)
     elif args.cmd == "issue-mqtt-broker":
         cert, _ = issue_mqtt_broker_identity(force=args.force)
         print("MQTT broker identity:", MQTT_BROKER_CERT_PATH)
