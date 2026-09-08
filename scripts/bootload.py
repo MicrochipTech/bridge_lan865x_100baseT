@@ -168,12 +168,22 @@ class Console:
         handing its console over to an update, for instance - can therefore land
         in the gap where the old session still counts, and the board accepts the
         TCP connection and closes it again without a prompt. Waiting a second
-        and asking again is the whole fix."""
+        and asking again is the whole fix.
+
+        OSError is retried alongside BootloadError, and that is not
+        belt-and-braces: the same gap shows up as a plain
+        ConnectionResetError (WinError 10054) or a connect/handshake timeout
+        just as often as it does as "no prompt within LOGIN_TIMEOUT",
+        depending on where in the TLS handshake the board drops it. Catching
+        only BootloadError meant this retry loop did not cover its own
+        documented failure mode - hit live on 2026-09-08, three consoles
+        opened back to back against the same board, the second one dying with
+        10054 straight out of wrap_socket()."""
         for attempt in range(attempts):
             try:
                 self._open_once()
                 return
-            except BootloadError:
+            except (BootloadError, OSError):
                 self.close()
                 if attempt == attempts - 1:
                     raise
