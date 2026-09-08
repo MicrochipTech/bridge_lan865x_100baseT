@@ -25,6 +25,7 @@ project was built, why particular decisions were made, and what was measured.
 | flash a board over the network instead of with a debug probe | [`bootload-agent-flashing-guide.md`](bootload-agent-flashing-guide.md) |
 | set up TLS on a fresh checkout, or start a bench over: which certificates exist, which have to be created and pushed | [`pki-clean-start.md`](pki-clean-start.md) |
 | know what TLS, certificates and MQTT cost in flash, RAM, heap and CPU | [`resource-cost-tls-mqtt.md`](resource-cost-tls-mqtt.md) |
+| put the SAME54's public-key accelerator to work against the 745 ms handshake stall | [`pukcc-acceleration-plan.md`](pukcc-acceleration-plan.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
 
@@ -119,6 +120,17 @@ mechanism instead of a debug probe: the `bootload.py` command and what a healthy
 run looks like, what a wedged board's Telnet-connect failure means and how to
 recover it (a plain SWD reset, not a flash), and why this path is preferred over
 `flash.bat`/pyOCD whenever a board is network-reachable.
+
+### [`pukcc-acceleration-plan.md`](pukcc-acceleration-plan.md) — plan, not yet built
+*A proposal with a decision point, not a to-do list.* How to hand the RSA-2048
+private-key operation to the PUKCC the part already has: what is already in the
+tree (the full PUKCL parameter-block API, the ROM jump table, wolfSSL's
+crypto-callback framework, all verified present), what is missing (only the
+glue), and three stages — a benchmark that measures the payoff **before**
+anything touches the TLS path, then the wolfSSL callback with a
+software-fallback-by-construction, then re-measurement. Names the risks with
+their costs, and says plainly what it will not fix: the handshake stall gets
+shorter, not gone, because PUKCL runs on the main core.
 
 ### [`resource-cost-tls-mqtt.md`](resource-cost-tls-mqtt.md) — what TLS actually costs
 *The question the TLS branch exists to answer, measured rather than estimated.*
