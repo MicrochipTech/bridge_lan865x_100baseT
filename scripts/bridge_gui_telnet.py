@@ -18,8 +18,10 @@ which continues to belong exclusively to bridge_gui.py.
 Standalone apart from one pip package: sv-ttk (required, for the theme). pyserial stays
 optional (only for the COM port label in the flash/erase probe picker - SWD access
 itself is independent of the Telnet link) - dep_check.py checks both at
-startup and offers to run setup_venv.bat if needed. For the Telnet connection itself
-the Python standard library (socket) is enough.
+startup and offers to run setup_venv.bat if needed. The Telnet connection itself needs
+nothing beyond the standard library and lives in bridge_core, next to the command
+protocol and the model helpers - shared verbatim with the browser front end
+(bridge_web_telnet.py), so neither of the two has its own copy of any of it.
 """
 
 import tkinter as tk
@@ -36,8 +38,6 @@ from pathlib import Path
 from typing import Dict, Optional, List
 import queue
 import time
-import socket
-import ssl
 
 # The network firmware update lives in its own module, deliberately GUI-free, so
 # it can be brought up and debugged from a command line (python scripts\bootload.py
@@ -46,6 +46,36 @@ import ssl
 # on sys.path for the script it runs, so a plain import is enough.
 import bootload
 import discover
+
+# The connection layer, the command protocol and the model helpers are shared with
+# the web front end (bridge_web_telnet.py) and live in bridge_core - stdlib-only and
+# deliberately free of any UI. They used to be defined right here; they were moved
+# out when the second front end appeared, because a second copy of
+# CommandChannel.send()'s timing rules (measured against the real board, see the
+# comments there) would drift apart and take those measurements with it.
+import bridge_core
+from bridge_core import (
+    CONFIG_FILE,
+    DEFAULT_CONFIG,
+    ENV_MODEL_FILE,
+    MAX_VIEW_LINES,
+    MODEL_FILE,
+    TELNET_CONNECT_TIMEOUT,
+    TELNET_LOGIN_TIMEOUT,
+    TELNET_PORT,
+    TLS_CA_CERT,
+    TLS_CLIENT_CERT,
+    TLS_CLIENT_KEY,
+    ERASE_CONFIRM_WORD,
+    FLASH_SAME54_SCRIPT,
+    MEMORYFILE_XML,
+    PYOCD_PYTHON,
+    RELEASE_HEX,
+    CommandChannel,
+    ResponseParser,
+    Screen,
+    TelnetLink,
+)
 
 # bootload/discover are stdlib-only, but these three pull third-party packages
 # in turn: pki and cert_provision need `cryptography`, mqtt_broker needs
@@ -71,115 +101,20 @@ except ImportError:
     serial = None
 
 
-def _console_python() -> str:
-    """Never use sys.executable blindly for the flash_same54.py subprocess call: if
-    this GUI is running under pythonw.exe (no second console window), flash_same54.py
-    builds [sys.executable, "-m", "pyocd", ...] from it - i.e. "pythonw.exe -m pyocd
-    erase --chip ...". That GRANDCHILD process loses its stdout somewhere in the
-    chain under pythonw: the flash/erase command still echoes, then nothing more -
-    not even "Chip erase complete", even though the erase itself completed fine on
-    the real board (measured on the sibling project this was ported from: under
-    console python.exe it streams every sector line in under 10s, under pythonw.exe
-    it goes silent right after the command line). python.exe sits next to
-    pythonw.exe in a standard install; falls back to sys.executable if that is not
-    there."""
-    exe = Path(sys.executable)
-    if exe.name.lower() == "pythonw.exe":
-        candidate = exe.with_name("python.exe")
-        if candidate.is_file():
-            return str(candidate)
-    return sys.executable
+# Nearly every path and constant this file used to define now comes from
+# bridge_core, so the web front end works against exactly the same ones:
+#   CONFIG_FILE          bridge_gui_telnet_config.json (json/ at the repo root)
+#   MODEL_FILE           lan8651_model.json, ENV_MODEL_FILE env_model.json
+#   TLS_*                the project CA and the operator client identity
+#   RELEASE_HEX          the tracked release\ HEX build.bat refreshes
+#   FLASH_SAME54_SCRIPT  the pyOCD wrapper, MEMORYFILE_XML the local build summary
+#   ERASE_CONFIRM_WORD   the word that has to be typed for a chip erase
+#   PYOCD_PYTHON         never pythonw.exe - see bridge_core.console_python
+# See the comments there for the reasoning behind each.
 
-
-PYOCD_PYTHON = _console_python()
-
-# Configuration file path - bridge_gui_telnet_config.json lives in json/ (repo root),
-# not next to this script. Deliberately separate from bridge_config.json (bridge_gui.py's
-# own file): this tool has its own connection fields (ip/telnet_user/telnet_password) and
-# its own session state (register values, bridge parameters read over Telnet).
-CONFIG_FILE = Path(__file__).parent.parent / "json" / "bridge_gui_telnet_config.json"
-
-# Flash/Erase over the EDBG probe (SWD), independent of the open serial link - see
-# flash_current_hex()/erase_chip(). RELEASE_HEX points at the tracked release\ HEX
-# build.bat refreshes after every successful build (CLAUDE.md section 2) - like the
-# related project's GUI, so a fresh clone can flash without building first. Not the
-# dist\ build output directly: that one only exists after a local build, and picking
-# it as the default would silently flash a stale/never-built path on a fresh clone.
-# FLASH_SAME54_SCRIPT already knows how to find the SAME54_DFP pack and pick a
-# probe, this GUI only adds the picker for "which probe, if more than one is
-# connected" and the confirmation dialogs.
-RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100baseT.hex"
-FLASH_SAME54_SCRIPT = Path(__file__).parent / "flash_same54.py"
-
-# Flash/RAM totals for the "Memory Overview" quick command: build.bat's own
-# scripts/build_summary.py writes this after every local build (xc32-bin2hex's
-# --memorysummary output, see that script). Only reflects the LAST LOCAL BUILD,
-# not necessarily what is actually flashed on the connected board right now -
-# the overview says so explicitly rather than implying it read the device's
-# own flash usage (there is no CLI command for that; meminfo only covers RAM).
-MEMORYFILE_XML = (Path(__file__).parent.parent / "firmware" / "tcpip_iperf_lan865x.X"
-                   / "dist" / "default" / "production" / "memoryfile.xml")
-
-# TLS bring-up (branch t1s-t1s-bridge-lan8670): the firmware's Telnet port now
-# requires a TLS handshake with mutual certificate auth (net_pres_enc_glue.c) -
-# this is this project's own CA/client identity (certs/ca/ + certs/default/,
-# repo root), generated with openssl, NOT wolfSSL's public test certs. See
-# pki.py's module docstring for why the CA lives in its own directory
-# (certs/ca/, separate from any leaf identity) and the session log for why a
-# project CA exists at all: wolfSSL's canned test PKI is both expired and
-# internally mismatched (its "client" cert doesn't even chain to its own "CA"
-# cert).
-TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "ca" / "ca_cert.pem"
-TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "client" / "client_cert.pem"
-TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "client" / "client_key.pem"
-# Typed into the erase confirmation dialog, not just clicked - a chip erase is not
-# reversible (wipes firmware AND the emulated EEPROM, both live in the same flash).
-ERASE_CONFIRM_WORD = "ERASE"
-
-# The register model: addresses, mnemonics, bit fields, origin. Kept separate from
-# the configuration because it's a different kind of thing -- a reference derived
-# from the datasheet that someone tracking down a bug relies on. The GUI only reads
-# it, NEVER writes it; values and session state belong in bridge_config.json.
-# If something is wrong here, fix this file, not the source code -- afterwards run
-# "python scripts\check_register_model.py". lan8651_model.json lives in json\
-# (repo root), not next to this script.
-MODEL_FILE = Path(__file__).parent.parent / "json" / "lan8651_model.json"
-
-# The environment model: which fields the EEPROM record has, how they are read from
-# showenv and which CLI command writes them -- per identity and version.
-# Firmware variants share the EEPROM offset but not the layout; that's why the
-# identity is read from the device and matched against this model instead of guessed.
-# env_model.json also lives in json\ (repo root).
-ENV_MODEL_FILE = Path(__file__).parent.parent / "json" / "env_model.json"
-
-# Default configuration
-# Fallback values if bridge_gui_telnet_config.json is missing. The register tab then
-# does NOT come along -- it's derived from the datasheet (LAN8650-1-Data-Sheet-60001734.pdf,
-# chapter 11, 182 registers) and lives exclusively in that configuration file.
-# ip/telnet_user/telnet_password are the defaults for this board (192.168.0.12,
-# admin/password) - changeable to a different board at any time by editing the fields
-# and connecting; connect_device() remembers whatever was last used to connect.
-DEFAULT_CONFIG = {
-    "ip": "192.168.0.12",
-    "telnet_user": "admin",
-    "telnet_password": "password",
-    "bridge": {
-        "ip0": "192.168.0.11",
-        "mask0": "255.255.255.0",
-        "gw0": "192.168.0.1",
-        "dns0": "192.168.0.1",
-        "ip1": "192.168.0.12",
-        "mask1": "255.255.255.0",
-        "gw1": "192.168.0.1",
-        "dns1": "192.168.0.1",
-        "mac0": "00:04:25:00:00:00",
-        "mac1": "00:04:25:00:00:01",
-        "plca_id": 5,
-        "plca_cnt": 8,
-        "mirror": 0,
-    },
-    "values": {},
-}
+# MODEL_FILE (lan8651_model.json), ENV_MODEL_FILE (env_model.json) and
+# DEFAULT_CONFIG are imported from bridge_core - both front ends read the same two
+# models, and neither of them ever writes one.
 
 # Terminal-spezifische Konstanten (aus gui_term.py)
 KEYSYM_BYTES = {
@@ -206,243 +141,8 @@ IGNORED_KEYSYMS = {
 CONTROL_BIT = 0x0004
 POLL_MS = 30
 BLINK_MS = 500
-MAX_VIEW_LINES = 1000
-TELNET_PORT = 23
-TELNET_CONNECT_TIMEOUT = 5.0   # TCP connect timeout, seconds
-TELNET_LOGIN_TIMEOUT = 5.0     # waiting for Login:/Password:/Logged in.../Access denied, seconds
-
-
-class Screen:
-    """Byte-to-text converter (aus gui_term.py)"""
-
-    def __init__(self, max_lines=MAX_VIEW_LINES):
-        self.max_lines = max_lines
-        self.lines = []
-        self.total = 0
-        self.cur = ""
-        self.col = 0
-        self._esc = None
-
-    def feed(self, data):
-        """Feed raw bytes and convert to screen state"""
-        for b in data:
-            if self._esc is not None:
-                self._esc.append(b)
-                if len(self._esc) == 1:
-                    if b not in (0x5B, 0x4F):
-                        self._esc = None
-                    continue
-                if 0x40 <= b <= 0x7E:
-                    self._sequence(bytes(self._esc))
-                    self._esc = None
-                continue
-            if b == 0x1B:
-                self._esc = bytearray()
-            elif b == 0x0D:
-                self.col = 0
-            elif b == 0x0A:
-                self._newline()
-            elif b == 0x08:
-                self.col = max(0, self.col - 1)
-            elif b == 0x09:
-                self._put(" " * (8 - (self.col % 8)))
-            elif 0x20 <= b <= 0xFF and b != 0x7F:
-                self._put(chr(b))
-
-    def _sequence(self, seq):
-        """Handle escape sequences"""
-        final = seq[-1:]
-        body = seq[1:-1]
-        if final == b"K":
-            if body in (b"", b"0"):
-                self.cur = self.cur[:self.col]
-            elif body == b"1":
-                self.cur = " " * self.col + self.cur[self.col:]
-            elif body == b"2":
-                self.cur = ""
-                self.col = 0
-
-    def _put(self, s):
-        if self.col > len(self.cur):
-            self.cur += " " * (self.col - len(self.cur))
-        self.cur = self.cur[:self.col] + s + self.cur[self.col + len(s):]
-        self.col += len(s)
-
-    def _newline(self):
-        self.lines.append(self.cur)
-        self.total += 1
-        self.cur = ""
-        self.col = 0
-        if len(self.lines) > self.max_lines:
-            del self.lines[:len(self.lines) - self.max_lines]
-
-    def text(self):
-        return "".join(line + "\n" for line in self.lines) + self.cur
-
-
-def _wrap_telnet_tls(sock, host):
-    """Upgrade a freshly connected plain socket to TLS with mutual-cert auth,
-    matching the firmware's net_pres_enc_glue.c (branch t1s-t1s-bridge-lan8670).
-    Raises (ssl.SSLError, FileNotFoundError, ...) on failure - the caller closes
-    the socket and propagates.
-
-    check_hostname is off on purpose: the server cert's CN ("bridge-server",
-    certs/default/server_cert.pem) is a fixed name picked at cert-generation
-    time, not the board's IP - there is no DNS/mDNS name here to match against.
-    The server's identity is still verified (CERT_REQUIRED, against our CA),
-    just not by hostname.
-    """
-    for path in (TLS_CA_CERT, TLS_CLIENT_CERT, TLS_CLIENT_KEY):
-        if not path.is_file():
-            raise FileNotFoundError(
-                "missing TLS file: %s (see certs/default/ - regenerate with openssl "
-                "if this was never checked out)" % path)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_verify_locations(cafile=str(TLS_CA_CERT))
-    ctx.load_cert_chain(certfile=str(TLS_CLIENT_CERT), keyfile=str(TLS_CLIENT_KEY))
-    # Confirmed live against the real board: without this, OpenSSL 3.x aborts
-    # the handshake with "UNSAFE_LEGACY_RENEGOTIATION_DISABLED" - the firmware's
-    # wolfSSL build doesn't send the (RFC 5746) renegotiation_info extension,
-    # which OpenSSL 3.x's default policy otherwise insists on. Not a client bug
-    # to route around blindly - just this embedded TLS stack not implementing an
-    # extension a modern desktop TLS library assumes.
-    ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
-    sock.settimeout(TELNET_CONNECT_TIMEOUT)
-    return ctx.wrap_socket(sock, server_hostname=host)
-
-
-class TelnetLink:
-    """Telnet connection with a reader thread - same interface as the serial
-    Link from bridge_gui.py (open()/write()/close(), bytes delivered over the same
-    queue as (self.port, "data"/"lost", payload)), so the rest of this GUI stays
-    unchanged. Runs the login (Login:/Password: prompt) synchronously in open(),
-    before the reader thread starts - after that it's all normal command/terminal
-    traffic, exactly like the serial original.
-
-    Prompt strings and flow come from firmware/src/config/default/library/tcpip/
-    src/telnet.c (TELNET_START_MSG, TELNET_ASK_PASSWORD_MSG, TELNET_FAIL_LOGON_MSG,
-    TELNET_LOGON_OK): there a line ends on the first CR OR LF in the buffer, a
-    complete "user\\r\\n"/"pass\\r\\n" sent at once is enough, no need to send
-    character by character (unlike the later command prompt, the SYS_CMD editor -
-    but that too handles a whole "<cmd>\\r" in one go without issue, see
-    send_command_via_link()).
-    """
-
-    def __init__(self, host, q, telnet_port=TELNET_PORT, username="", password=""):
-        self.host = host
-        self.port = host  # Display name for status lines ("Connected to {link.port}")
-        self.telnet_port = telnet_port
-        self.username = username
-        self.password = password
-        self.q = q
-        self.sock = None
-        self.stop = threading.Event()
-        self.thread = None
-
-    def open(self):
-        sock = socket.create_connection((self.host, self.telnet_port),
-                                         timeout=TELNET_CONNECT_TIMEOUT)
-        try:
-            sock = _wrap_telnet_tls(sock, self.host)
-        except Exception:
-            sock.close()
-            raise
-        sock.settimeout(0.2)
-        self.sock = sock
-        try:
-            leftover = self._login()
-        except Exception:
-            sock.close()
-            self.sock = None
-            raise
-        self.sock.settimeout(0.05)
-        if leftover:
-            self.q.put((self.port, "data", leftover))
-        self.thread = threading.Thread(target=self._read, daemon=True)
-        self.thread.start()
-
-    def _recv_until(self, markers, overall_timeout=TELNET_LOGIN_TIMEOUT):
-        """Collect bytes until one of the markers (bytes) shows up in the buffer - or
-        raise TimeoutError if the device doesn't respond within overall_timeout seconds."""
-        buf = b""
-        deadline = time.time() + overall_timeout
-        while time.time() < deadline:
-            try:
-                chunk = self.sock.recv(4096)
-            except socket.timeout:
-                continue
-            if not chunk:
-                raise ConnectionError("connection closed during login")
-            buf += chunk
-            if any(m in buf for m in markers):
-                return buf
-        raise TimeoutError("no response from %s (expected %s)" %
-                            (self.host, b"/".join(markers).decode("latin-1")))
-
-    def _login(self):
-        """Login:/Password: dialog. Returns whatever already arrived after 'Logged in
-        successfully' (e.g. the start of the welcome message) - that ends up as a
-        perfectly normal first "data" message in the queue, instead of being
-        discarded."""
-        self._recv_until([b"Login:"])
-        self.sock.sendall(self.username.encode("latin-1", "ignore") + b"\r\n")
-        self._recv_until([b"Password:"])
-        self.sock.sendall(self.password.encode("latin-1", "ignore") + b"\r\n")
-        buf = self._recv_until([b"Logged in successfully", b"Access denied"])
-        if b"Access denied" in buf:
-            raise PermissionError("Access denied - check user/password")
-        marker = b"Logged in successfully"
-        return buf[buf.find(marker) + len(marker):]
-
-    def _read(self):
-        while not self.stop.is_set():
-            try:
-                data = self.sock.recv(4096)
-            except socket.timeout:
-                continue
-            except OSError as error:
-                if not self.stop.is_set():
-                    self.q.put((self.port, "lost", str(error)))
-                return
-            if not data:
-                if not self.stop.is_set():
-                    self.q.put((self.port, "lost", "connection closed by device"))
-                return
-            self.q.put((self.port, "data", data))
-
-    def write(self, data):
-        if self.sock is None:
-            raise OSError("not connected")
-        self.sock.sendall(data)
-
-    def close(self):
-        self.stop.set()
-        if self.thread is not None:
-            self.thread.join(timeout=0.5)
-        if self.sock is not None:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
-        self.sock = None
-
-
-class ResponseParser:
-    """Evaluates the device's response lines.
-
-    Like the serial original (bridge_gui.py): no separate subprocess per
-    command, all commands run over the single already-open link
-    (BridgeGUITelnet.send_command_via_link); parsing is all that's left to do.
-    """
-
-    def parse_register_read(self, output: str) -> Optional[str]:
-        """Extract the value from 'LAN865X Read OK: Addr=... Value=...'."""
-        match = re.search(r'Value=0x([0-9A-Fa-f]+)', output)
-        if match:
-            return "0x" + match.group(1)
-        return None
+# MAX_VIEW_LINES and the TELNET_* timeouts come from bridge_core as well, next
+# to the TelnetLink they belong to.
 
 
 # sv-ttk semantic colors, chosen for legibility on its dark background
@@ -490,7 +190,11 @@ class BridgeGUITelnet:
         self.cli = ResponseParser()
         self.result_queue = queue.Queue()
         self.connected = False
-        self.port_link: Optional[TelnetLink] = None  # Global connection for CLI + terminal
+        # The open link plus the arbitration around it, in one object from
+        # bridge_core. self.port_link and the three cmd_* names below are properties
+        # onto this channel, so the ~40 places in this file that use them read
+        # exactly as they did before the split.
+        self._channel = CommandChannel()
 
         # The path last picked via "Select Hex..." -- "Flash" uses this instead of
         # always RELEASE_HEX (release\bridge_lan865x_100baseT.hex) once one has been
@@ -498,12 +202,10 @@ class BridgeGUITelnet:
         # persisted.
         self._selected_hex_path: Path = RELEASE_HEX
 
-        # Command responses run over their OWN queue. Otherwise
-        # terminal_process_queue() (main thread, every 30 ms) and the worker thread
-        # compete for the same chunks, and the response arrives torn apart -> empty fields.
-        self.cmd_response_q = queue.Queue()
-        self.cmd_pending = threading.Event()
-        self.cmd_lock = threading.Lock()
+        # Command responses run over their OWN queue (self._channel.response_q).
+        # Otherwise terminal_process_queue() (main thread, every 30 ms) and the worker
+        # thread compete for the same chunks, and the response arrives torn apart ->
+        # empty fields.
 
         # Scrollable canvases (register tab per MMS group, bridge parameter tab), for the
         # ONE global mouse-wheel handler in _register_wheel_canvas/_on_global_wheel.
@@ -538,6 +240,32 @@ class BridgeGUITelnet:
         # 0 = S_OK) but the title bar visibly stayed light without a stable
         # window to repaint yet.
         self._apply_dark_titlebar(self._dark)
+
+    # --- the connection, as seen by the rest of this file -------------------
+    # Four names that used to be plain attributes and are now views onto
+    # self._channel (bridge_core.CommandChannel). Kept rather than renamed at ~40
+    # call sites: the rename would have been the only risky part of moving the
+    # connection layer out, for no gain.
+
+    @property
+    def port_link(self) -> Optional[TelnetLink]:
+        return self._channel.link
+
+    @port_link.setter
+    def port_link(self, link: Optional[TelnetLink]) -> None:
+        self._channel.link = link
+
+    @property
+    def cmd_response_q(self) -> queue.Queue:
+        return self._channel.response_q
+
+    @property
+    def cmd_pending(self) -> threading.Event:
+        return self._channel.pending
+
+    @property
+    def cmd_lock(self) -> threading.Lock:
+        return self._channel.lock
 
     def _apply_dark_titlebar(self, dark: bool) -> None:
         """Color the native Windows title bar to match - sv-ttk (and ttk in
@@ -744,8 +472,7 @@ class BridgeGUITelnet:
         reference is missing.
         """
         try:
-            with open(MODEL_FILE, "r", encoding="utf-8") as f:
-                model = json.load(f)
+            model = bridge_core.load_json_model(MODEL_FILE)
         except FileNotFoundError:
             messagebox.showerror(
                 "Register model missing",
@@ -764,8 +491,7 @@ class BridgeGUITelnet:
     def load_env_model(self) -> dict:
         """Load the environment model. If it's missing, the parameter tab stays empty and says so."""
         try:
-            with open(ENV_MODEL_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            return bridge_core.load_json_model(ENV_MODEL_FILE)
         except FileNotFoundError:
             messagebox.showerror(
                 "Environment model missing",
@@ -788,29 +514,7 @@ class BridgeGUITelnet:
         to env_entry(), it would interpret the values against the OLD state -- and the
         GUI would show filled-in fields under a line that says they aren't interpreted.
         """
-        envs = self.env_model.get("environments", {})
-        if not envs:
-            return {}
-        if not identity:
-            return next(iter(envs.values()))
-        # Match on the FIRMWARE's own identity, not the stored EEPROM record's: showenv
-        # always prints the value lines from its own current struct (the loaded record if
-        # valid, the compiled defaults otherwise) - never raw bytes in a foreign layout.
-        # firmware_id/version therefore always describes what layout those lines are in,
-        # while eeprom_id/version/crc is purely "what was found at boot" diagnostic info.
-        # Keying on eeprom_id instead would refuse to interpret a perfectly valid set of
-        # values whenever the stored record is blank/corrupt (e.g. a freshly erased chip
-        # after a full MPLAB X program) - exactly the case "Write Environment" exists to fix.
-        for found_id, found_ver in (
-                (identity.get("firmware_id"), str(identity.get("firmware_version"))),
-                (identity.get("eeprom_id"), str(identity.get("eeprom_version")))):
-            for env in envs.values():
-                if str(env.get("version")) != found_ver:
-                    continue
-                if found_id == env.get("id") or found_id in env.get("accepts_ids", []):
-                    return env
-        return {}
-
+        return bridge_core.env_entry_for(self.env_model, identity)
     def env_entry(self) -> dict:
         """The model entry the GUI is currently working against.
 
@@ -820,13 +524,7 @@ class BridgeGUITelnet:
         the result is empty and the GUI shows the values as not interpretable, instead
         of making them up.
         """
-        envs = self.env_model.get("environments", {})
-        if not envs:
-            return {}
-        if self.env_identity:
-            return self.env_entry_for(self.env_identity)
-        return next(iter(envs.values()))
-
+        return bridge_core.env_entry(self.env_model, self.env_identity)
     def env_identity_label_color(self, ok: bool) -> None:
         """Gray as long as everything matches - red as soon as it doesn't."""
         widget = getattr(self, "_env_identity_widget", None)
@@ -834,89 +532,21 @@ class BridgeGUITelnet:
             widget.configure(foreground="#555" if ok else "#b00")
 
     def env_identity_line(self) -> str:
-        """The line above the parameter tab: what's in the EEPROM and whether we can interpret it."""
-        if not self.env_model:
-            return "no environment model loaded"
-        if not self.env_identity:
-            envs = ", ".join(self.env_model.get("environments", {}))
-            return f"Environment: not read yet - the model knows {envs}. 'Read Environment' asks the device."
-        ident = self.env_identity
-        ee = f"{ident.get('eeprom_id')} v{ident.get('eeprom_version')}"
-        fw = f"{ident.get('firmware_id')} v{ident.get('firmware_version')}"
-        crc = ident.get("eeprom_crc", "?")
-        entry = self.env_entry()
-        if entry:
-            if ident.get("eeprom_id") == ident.get("firmware_id") and crc == "ok":
-                note = "model fits"
-            elif crc == "ok":
-                # Not an error: the firmware still reads this legacy identity and has
-                # accepted the record -- otherwise there would be no model entry here.
-                # On the next saveenv it writes it back with the new identity.
-                note = (f"legacy id, accepted by the firmware - the next "
-                        f"'{entry.get('commands', {}).get('persist', 'saveenv')}' "
-                        f"rewrites it as {ident.get('firmware_id')}")
-            else:
-                # No record the firmware trusts was found at boot (blank/erased EEPROM -
-                # e.g. right after a full chip program - or a foreign/corrupt record), so
-                # it fell back to its compiled defaults. Those defaults ARE in this
-                # firmware's own current layout, so the values below are still real and
-                # safe to read/write - only 'Write Environment' + saveenv is missing to
-                # make them survive a reset.
-                note = ("no valid record found at boot - showing the firmware's compiled "
-                        "defaults. 'Write Environment' persists them.")
-            return (f"Environment: EEPROM {ee} (crc {crc}) | Firmware {fw} "
-                    f"{ident.get('firmware_variant', '')} - {note}")
-        return (f"WARNING: the EEPROM reports {ee}, which this tool has no model for. "
-                f"The values below are NOT interpreted. Firmware {fw} "
-                f"{ident.get('firmware_variant', '')}")
-
+        """The line above the parameter tab: what's in the EEPROM and whether we can
+        interpret it."""
+        return bridge_core.env_identity_line(self.env_model, self.env_identity)
     def model_source_line(self) -> str:
         """A one-liner about the provenance, shown by the GUI -- so it doesn't claim
         more than it can back up."""
-        if not self.model:
-            return "no register model loaded"
-        ds = self.model.get("sources", {}).get("datasheet", {})
-        er = self.model.get("sources", {}).get("errata", {})
-        ver = self.model.get("verification", {})
-        n_reg = sum(len(g.get("registers", {})) for g in self.model.get("groups", {}).values())
-        n_ver = ver.get("registers_verified", 0)
-        line = (f"Model: {ds.get('doc', '?')} ({ds.get('date', '?')}), Chapter "
-                f"{ds.get('chapter', '?')} - {n_reg} registers, {n_ver} checked against "
-                f"the document")
-        if er:
-            line += f" | Errata {er.get('doc')}"
-        return line
-
+        return bridge_core.model_source_line(self.model)
     def load_config(self) -> dict:
-        """Load configuration from JSON or create default.
-
-        encoding="utf-8" is not optional here. save_config() writes UTF-8; without an
-        explicit encoding this read takes the Windows default (cp1252), so the three
-        bytes of "'" come back as three separate characters and the next save writes
-        THOSE as UTF-8. The damage therefore compounds with every round trip -
-        "Manufacturer's" turned into "Manufacturerâ€™s" and then into
-        "ManufacturerÃ¢â‚¬â„¢s" - and nothing ever reports an error, because every
-        intermediate file is valid JSON.
-        """
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, 'r', encoding="utf-8") as f:
-                return json.load(f)
-        return DEFAULT_CONFIG.copy()
-
+        """Load configuration from JSON or create default (bridge_core.load_config,
+        shared with the web front end - both read and write the same file)."""
+        return bridge_core.load_config()
     def save_config(self):
-        """Write the configuration -- serialize first, then replace.
-
-        open(..., 'w') empties the file the moment it's opened; if json.dump then
-        fails, the register tab is gone. So convert to bytes first (an error is then
-        raised before anything gets touched), write to a neighboring file, and only
-        swap it in via os.replace at the very end.
-        """
-        data = json.dumps(self.config, indent=2, ensure_ascii=False).encode("utf-8")
-        tmp = CONFIG_FILE.with_suffix(".json.tmp")
-        with open(tmp, "wb") as f:
-            f.write(data)
-        os.replace(tmp, CONFIG_FILE)
-
+        """Write the configuration - serialize first, then replace, see
+        bridge_core.save_config."""
+        bridge_core.save_config(self.config)
     def setup_ui(self):
         """Build the main UI"""
         # Top frame: Telnet connection (IP/user/password) instead of bridge_gui.py's
@@ -1179,13 +809,13 @@ class BridgeGUITelnet:
         reg_notebook.bind("<<NotebookTabChanged>>", self._on_reg_tab_changed)
 
         # The map comes from the model, the last-read values from the config.
-        registers = {name: g.get("registers", {})
-                     for name, g in self.model.get("groups", {}).items()}
+        # bridge_core.register_view does the flattening for both front ends, so the
+        # model file stays the single description of the chip.
+        self.register_categories, self.register_meta = bridge_core.register_view(self.model)
         saved_values = self.config.get("values", {})
 
         # Create a tab for each category
-        for category, regs in registers.items():
-            self.register_categories[category] = list(regs.keys())
+        for category, addrs in self.register_categories.items():
             category_frame = ttk.Frame(reg_notebook)
             reg_notebook.add(category_frame, text=category)
 
@@ -1217,24 +847,14 @@ class BridgeGUITelnet:
             self._reg_tab_canvases[str(category_frame)] = canvas
 
             # Create fields for each register in this category
-            for addr, info in regs.items():
+            for addr in addrs:
                 self.register_fields[addr] = tk.StringVar(value=saved_values.get(addr, ""))
 
-                # Modellformat: mnemonic + name, bits als Objekte mit name/description.
-                reg_name = info.get("mnemonic", "")
-                reg_desc = info.get("name", "")
-                bits = info.get("bits", {})
-                bitfields = {spec: f"{f.get('name', '')} - {f.get('description', '')}".strip(" -")
-                             for spec, f in bits.items()}
-                errata = info.get("errata", [])
-
-                self.register_meta[addr] = {
-                    "category": category,
-                    "name": reg_name,
-                    "description": reg_desc,
-                    "bitfields": bitfields,
-                    "errata": errata,
-                }
+                meta = self.register_meta[addr]
+                reg_name = meta["name"]
+                reg_desc = meta["description"]
+                bitfields = meta["bitfields"]
+                errata = meta["errata"]
 
                 # Main row (address, name, value, buttons)
                 row = ttk.Frame(scrollable_frame)
@@ -1316,29 +936,9 @@ class BridgeGUITelnet:
         # The bulk buttons that used to sit here are in the top bar now (create_widgets),
         # where they stay visible no matter which tab is open or how far it is scrolled.
 
-    # (mode, title, description) - description is the "explained in detail" text shown
-    # in that mode's own group. Kept here as data, not spread across widget calls, so a
-    # fifth mode is one more tuple. Longer background (setup notes, safety) stays in
-    # docs/LAN8651_TEST_MODES.md; this is the summary worth having next to the button.
-    TEST_MODES = [
-        (1, "Output Voltage & Timing Jitter",
-         "Drives the bus with the IEEE 802.3 §147.5.2 test pattern for amplitude and edge timing.\n"
-         "Measures: differential output amplitude (peak-to-peak), timing jitter of the edges, rise/fall time.\n"
-         "Instrument: oscilloscope, differential probe at the MDI, terminated bus."),
-        (2, "Output Droop",
-         "Drives the bus with a sustained-symbol pattern to expose AC-coupling droop.\n"
-         "Measures: amplitude sag from the start to the end of the sustained interval, as % of the initial value.\n"
-         "Instrument: oscilloscope, differential probe, averaging on."),
-        (3, "PSD Mask (Spectral Emissions)",
-         "Drives the bus with a pattern whose spectral content is compared against the IEEE PSD mask.\n"
-         "Measures: power spectral density vs. the standard's mask, especially where the trace comes closest to it.\n"
-         "Instrument: spectrum analyzer - needs a balun/transformer fixture, the bus is differential 100 Ω, "
-         "the analyzer input is single-ended 50 Ω."),
-        (4, "Transmitter High Impedance",
-         "Puts the transmitter into a high-impedance state instead of driving the bus.\n"
-         "Measures: the rest of the segment without this node's contribution, or this node's own off-state impedance.\n"
-         "Instrument: oscilloscope, TDR, or ohmmeter - this node stays physically attached but electrically silent."),
-    ]
+    # The (mode, title, description) list lives in bridge_core.TEST_MODES so both
+    # front ends describe the same four modes; a fifth one is one more tuple there.
+    TEST_MODES = bridge_core.TEST_MODES
 
     def create_testmodes_tab(self):
         """Create Test Modes tab: one group per mode, each with its own start button and
@@ -1945,6 +1545,8 @@ class BridgeGUITelnet:
         return sel[0]
 
     def cert_show_device(self):
+        if not self._require_tls(self._cert_log):
+            return
         host = self.ip_var.get().strip()
         user = self.telnet_user_var.get()
         password = self.telnet_password_var.get()
@@ -1968,6 +1570,8 @@ class BridgeGUITelnet:
         board_id = self._cert_selected_board_id()
         if board_id is None:
             return
+        if not self._require_tls(self._cert_log):
+            return
         host = self.ip_var.get().strip()
         user = self.telnet_user_var.get()
         password = self.telnet_password_var.get()
@@ -1990,6 +1594,8 @@ class BridgeGUITelnet:
         self._cert_log("Pushing '%s' to %s..." % (board_id, host))
 
     def cert_reset_device(self):
+        if not self._require_tls(self._cert_log):
+            return
         host = self.ip_var.get().strip()
         user = self.telnet_user_var.get()
         password = self.telnet_password_var.get()
@@ -2192,6 +1798,8 @@ class BridgeGUITelnet:
         sel = self.mqtt_boards_tree.selection()
         if not sel:
             messagebox.showinfo("No selection", "Discover the boards first, then select one.")
+            return
+        if not self._require_tls(self._mqtt_log):
             return
         ip, mac, _via, _state = self.mqtt_boards_tree.item(sel[0], "values")
         try:
@@ -2436,6 +2044,24 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
             self.connect_toggle_btn.config(text="🔴 Connect", bg="#c0392b",
                                             activebackground="#c0392b")
 
+    def _require_tls(self, log=None) -> bool:
+        """Refuse, with an actionable message, if the client identity is incomplete.
+
+        Checked BEFORE anything opens a console. Without it, a checkout with no
+        certs/client/ fails deep inside OpenSSL - bootload.Console retries three
+        times over ~12 seconds and then reports a bare "[Errno 2] No such file or
+        directory" with no path in it, which is a dead end even though the fix is a
+        button on the Certificates tab. Hit exactly that way on 2026-09-08, pushing
+        an identity to 192.168.0.21.
+        """
+        problem = bridge_core.tls_identity_problem()
+        if problem is None:
+            return True
+        messagebox.showerror("No client identity", problem)
+        if log is not None:
+            log(problem)
+        return False
+
     def toggle_connection(self):
         """The single Connect/Disconnect button: act on whichever is currently true."""
         if self.port_link:
@@ -2452,6 +2078,9 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
         if self.port_link:
             messagebox.showinfo("Info", "Already connected")
+            return
+
+        if not self._require_tls():
             return
 
         user = self.telnet_user_var.get()
@@ -2508,34 +2137,9 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
     @staticmethod
     def _read_local_flash_ram_summary() -> Optional[str]:
-        """Flash/RAM totals from the last local build (MEMORYFILE_XML), formatted
-        as two lines - or None if this machine never built locally (a fresh
-        clone that only ever flashed release\\...hex has no dist\\ output)."""
-        try:
-            xml_text = MEMORYFILE_XML.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            return None
-
-        def block(name):
-            m = re.search(
-                r'<memory name="%s">.*?<length>(\d+)</length>\s*'
-                r'<used>(\d+)</used>\s*<free>(\d+)</free>' % name,
-                xml_text, re.DOTALL)
-            return tuple(int(g) for g in m.groups()) if m else None
-
-        program = block("program")
-        data = block("data")
-        if not program or not data:
-            return None
-        length, used, free = program
-        pct = 100.0 * used / length if length else 0.0
-        lines = ["Flash (last local build, not necessarily what's on the board now):",
-                 "  used %d / %d bytes (%.1f%%), %d free" % (used, length, pct, free)]
-        length, used, free = data
-        pct = 100.0 * used / length if length else 0.0
-        lines.append("RAM, static .data+.bss (same build):")
-        lines.append("  used %d / %d bytes (%.1f%%), %d free" % (used, length, pct, free))
-        return "\n".join(lines)
+        """Flash/RAM totals from the last local build (MEMORYFILE_XML), or None if
+        this machine never built locally."""
+        return bridge_core.read_local_flash_ram_summary()
 
     def memory_overview(self):
         """Quick Commands > 'Memory Overview': the live device heap (meminfo)
@@ -2551,34 +2155,8 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         def worker():
             raw = self.send_command_via_link("meminfo", timeout_ms=1500)
             cleaned = self.clean_response("meminfo", raw)
-
-            lines = ["=== Live heap (device, right now) ==="]
-            m = re.search(r"C-runtime heap:\s*total=(\d+)\s+largest free block=(\d+)", cleaned)
-            if m:
-                total, largest = int(m.group(1)), int(m.group(2))
-                lines.append("C-runtime heap (wolfSSL/malloc): %d bytes total, "
-                             "largest free block %d bytes" % (total, largest))
-                lines.append("  (nano-malloc - no exact free total, only the "
-                             "largest single block it could hand out right now)")
-            m = re.search(r"TCP/IP heap:\s*size=(\d+)\s+free=(\d+)\s+maxblock=(\d+)\s+highwater=(\d+)",
-                          cleaned)
-            if m:
-                size, free, maxblock, highwater = (int(g) for g in m.groups())
-                lines.append("TCP/IP heap: %d bytes total, %d free, largest block %d, "
-                             "high-water mark %d" % (size, free, maxblock, highwater))
-            if len(lines) == 1:
-                lines.append(cleaned or "(no response)")
-
-            local = self._read_local_flash_ram_summary()
-            lines.append("")
-            if local:
-                lines.append(local)
-            else:
-                lines.append("(no local build found under dist\\ - Flash/RAM figures need "
-                             "a local build.bat run; meminfo above still reflects the board "
-                             "as it is right now)")
-
-            self.result_queue.put(("cmd_result", True, "\n".join(lines)))
+            self.result_queue.put(("cmd_result", True,
+                                   bridge_core.format_memory_overview(cleaned)))
 
         threading.Thread(target=worker, daemon=True).start()
         self.set_status("Reading memory overview...")
@@ -2654,47 +2232,17 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         self._show_probe_picker(probes, mode, hex_path)
 
     def _list_probes(self) -> List[tuple]:
-        """Probes per pyOCD, via 'flash_same54.py --list' rather than importing pyocd
-        directly here - pyocd stays a dependency of the flash tool, not this GUI (see
-        the module docstring: "Standalone apart from one pip package"). Output is
-        one line per probe: '<unique_id>  <vendor> <product>' (flash_same54.py's own
-        list_probes())."""
+        """Probes per pyOCD, via 'flash_same54.py --list' - see
+        bridge_core.list_probes for why it is a subprocess and not an import."""
         try:
-            proc = subprocess.run(
-                [PYOCD_PYTHON, str(FLASH_SAME54_SCRIPT), "--list"],
-                capture_output=True, text=True, timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW)
+            return bridge_core.list_probes()
         except (OSError, subprocess.SubprocessError) as exc:
             messagebox.showerror("pyOCD", f"Could not list probes: {exc}")
             return []
-        port_by_serial = self._com_ports_by_probe_serial()
-        probes = []
-        for line in proc.stdout.splitlines():
-            m = re.match(r"^(\S+)\s{2,}(.+)$", line.strip())
-            if m:
-                unique_id, desc = m.group(1), m.group(2)
-                port = port_by_serial.get(unique_id)
-                if port:
-                    desc = f"{desc}  ({port})"
-                probes.append((unique_id, desc))
-        return probes
-
     def _com_ports_by_probe_serial(self) -> Dict[str, str]:
-        """Map an EDBG probe's serial (pyOCD's unique_id) to its own COM port, so the
-        probe picker can show which COM port belongs to the same physical board -
-        not just an opaque serial number. Informational only: this GUI itself
-        connects to the board over Telnet, not that COM port.
-
-        An EDBG probe exposes its debug (CMSIS-DAP) and virtual-COM (CDC) function as
-        separate USB interfaces of the SAME composite device, sharing one USB serial
-        descriptor - verified on this bench (2026-08-29): pyserial's serial_number and
-        pyOCD's unique_id came back byte-identical for all three connected probes.
-        """
-        if serial is None:
-            return {}
-        from serial.tools import list_ports
-        return {p.serial_number: p.device for p in list_ports.comports() if p.serial_number}
-
+        """EDBG probe serial (pyOCD's unique_id) -> its own COM port, so the probe
+        picker can show which COM port belongs to the same physical board."""
+        return bridge_core.com_ports_by_probe_serial()
     def _show_probe_picker(self, probes: List[tuple], mode: str,
                             hex_path: Optional[Path] = None) -> None:
         """Modal dialog: pick ONE of the probes found, then go straight on - a second,
@@ -2792,25 +2340,9 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
             suffix = f"  ({description})" if description else ""
             self.result_queue.put(("op_line",
                                    f"[{timestamp}] $ flash_same54.py {' '.join(extra_args)}{suffix}"))
-            env = dict(os.environ, PYTHONUNBUFFERED="1")
-            success = False
-            proc = None
-            try:
-                proc = subprocess.Popen(
-                    [PYOCD_PYTHON, str(FLASH_SAME54_SCRIPT)] + extra_args,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, env=env,
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                for line in proc.stdout:
-                    self.result_queue.put(("op_line", line.rstrip("\n")))
-                proc.wait(timeout=timeout)
-                success = proc.returncode == 0
-            except subprocess.TimeoutExpired:
-                if proc is not None:
-                    proc.kill()
-                self.result_queue.put(("op_line", f"flash_same54.py did not finish within {timeout} s - killed."))
-            except OSError as exc:
-                self.result_queue.put(("op_line", f"flash_same54.py failed to start: {exc}"))
+            success = bridge_core.stream_pyocd_op(
+                extra_args, lambda line: self.result_queue.put(("op_line", line)),
+                timeout=timeout)
             self.result_queue.put(("op_done", success, label))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -2844,6 +2376,9 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                                    "Connect to the board first - the update needs the "
                                    "Telnet console to arm the board and to check the result "
                                    "afterwards.")
+            return
+
+        if not self._require_tls():
             return
 
         hex_path = self._selected_hex_path
@@ -3003,13 +2538,7 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
     @staticmethod
     def clean_response(command: str, output: str) -> str:
         """Strip the command echo and prompt characters from the response."""
-        lines = []
-        for raw in output.replace("\r", "\n").split("\n"):
-            line = raw.strip().lstrip(">").strip()
-            if not line or line == command.strip():
-                continue
-            lines.append(line)
-        return "\n".join(lines)
+        return bridge_core.clean_response(command, output)
 
     def _blink_loop(self):
         """Blink cursor in terminal"""
@@ -3028,8 +2557,7 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                 # Two queues, one copy each, so there's no race over the chunks.
                 if len(result) >= 3 and result[1] == "data":
                     self.terminal_q.put(result)
-                    if self.cmd_pending.is_set():
-                        self.cmd_response_q.put(result)
+                    self._channel.dispatch(result)
                     continue
 
                 if result[0] == "port_opened":
@@ -3216,132 +2744,17 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
     # Register read/write via open Link (not cli.py)
     def decode_one_bitfield(self, value_hex: str, bits_range: str) -> str:
-        """The value of ONE bit field, as a suffix for its own line.
-
-        Empty string if nothing was read or the value is unreadable - then the line
-        shows only the description, and no one mistakes a 0 for a measurement.
-        """
-        if not value_hex or not value_hex.strip():
-            return ""
-        try:
-            value = int(value_hex, 16)
-        except (ValueError, TypeError):
-            return ""
-        try:
-            if ":" in bits_range:
-                high, low = map(int, bits_range.split(":"))
-                width = high - low + 1
-                field_value = (value >> low) & ((1 << width) - 1)
-            else:
-                width = 1
-                field_value = (value >> int(bits_range)) & 1
-        except ValueError:
-            return ""
-        if width == 1:
-            return f"  = {field_value}"
-        return f"  = {field_value} (0x{field_value:X})"
-
+        """The value of ONE bit field, as a suffix for its own line."""
+        return bridge_core.decode_one_bitfield(value_hex, bits_range)
     def send_command_via_link(self, cmd: str, timeout_ms: int = 700) -> str:
         """Send a command over the open link and wait for the response.
 
-        Runs on the worker thread. The response arrives via cmd_response_q, which is
-        only filled while cmd_pending is set -- so the terminal consumer on the main
-        thread doesn't read away the same chunks.
+        Runs on the worker thread. The protocol - and in particular the settle
+        window that keeps 'showenv' from being truncated without making every
+        'lan_read' return an empty value - lives in bridge_core.CommandChannel.send,
+        because the web front end has to speak exactly the same one.
         """
-        if not self.port_link:
-            return "ERROR: Not connected"
-
-        # Only one command at a time, otherwise two responses get mixed together.
-        with self.cmd_lock:
-            # Discard any leftovers, otherwise the previous command's response lands here.
-            while True:
-                try:
-                    self.cmd_response_q.get_nowait()
-                except queue.Empty:
-                    break
-
-            self.cmd_pending.set()
-            try:
-                self.port_link.write(cmd.encode() + b"\r")
-
-                start = time.time()
-                chunks = []
-                # Set the moment the response looks done (own echo + a trailing "> " on
-                # its own line) but not yet trusted - see below for why it needs a
-                # settle window instead of returning immediately.
-                prompt_seen_at = None
-                PROMPT_SETTLE_S = 0.15
-
-                while time.time() - start < timeout_ms / 1000.0:
-                    try:
-                        port, kind, payload = self.cmd_response_q.get(timeout=0.01)
-                    except queue.Empty:
-                        # Nothing new since the trailing prompt appeared - if that's
-                        # been true for the whole settle window, it really is done.
-                        if prompt_seen_at is not None and time.time() - prompt_seen_at >= PROMPT_SETTLE_S:
-                            return "".join(chunks)
-                        continue
-
-                    if kind != "data":
-                        continue
-                    chunks.append(payload.decode("latin-1", "ignore"))
-                    text = "".join(chunks)
-                    # Done once the marker is there AND the line is complete -- an
-                    # "OK:" without a line ending is only the beginning. Always takes
-                    # priority over the prompt-based check below, and is why
-                    # 'lan_read'/'lan_write' resolve almost instantly despite needing
-                    # the settle window (see below): their "OK:"/"ERROR" line lands
-                    # a few ms after the prompt, well inside PROMPT_SETTLE_S, so this
-                    # fires first on the very next chunk.
-                    for marker in ("OK:", "ERROR"):
-                        pos = text.find(marker)
-                        if pos >= 0 and "\n" in text[pos:]:
-                            return text
-                    # The CLI re-printing its "> " prompt on its own line is the
-                    # definitive end-of-response marker for a command whose own output
-                    # never contains "OK:"/"ERROR" (namely 'showenv') - independent of
-                    # what the command actually prints, unlike the marker check above.
-                    # This replaces an earlier idle-based cutoff (return once ~40ms
-                    # passed with no new chunk) that was wrong over Telnet: 'showenv'
-                    # legitimately arrives in two TCP segments, with the eth0/eth1/mac/
-                    # plca/mirror/sniffer lines up to a full second behind the identity
-                    # line - the idle cutoff fired in that gap and truncated the
-                    # response to the identity line alone, which then made every field
-                    # in the env parser come back unmatched (found stays 0) - the
-                    # "Command failed" dialog on Read Environment against
-                    # 192.168.0.21/.32, confirmed 2026-09-04.
-                    #
-                    # 'cmd in text' guards against a DIFFERENT race this introduced: a
-                    # rapid back-to-back loop (bulk_read_registers, one lan_read per
-                    # register) can still have the PREVIOUS command's own trailing ">"
-                    # in flight when this command's cmd_pending goes up - that stray
-                    # byte alone would satisfy "last line is '>'" before this command's
-                    # own echo has even arrived. A genuine completion always contains
-                    # this command's own echo.
-                    #
-                    # And why this can't just return immediately, unlike the fixes
-                    # above: measured directly against the board (2026-09-04), this
-                    # firmware's console prints the fresh "> " prompt right after
-                    # echoing the command line - BEFORE dispatching to the command
-                    # handler - so for 'lan_read'/'lan_write' the prompt reliably
-                    # arrives a few ms BEFORE the real "LAN865X ... OK: ... Value=..."
-                    # line, not after. Trusting it immediately (as an earlier version of
-                    # this fix did) returned the bare echo+prompt with no value at all,
-                    # near-100% of the time in bulk_read_registers - far worse than the
-                    # original bug. The settle window lets the marker check above win
-                    # the race on the next chunk when there is one; only a command like
-                    # 'showenv', whose trailing prompt really is the last thing sent,
-                    # ever actually waits out PROMPT_SETTLE_S.
-                    last_line = text.replace("\r", "").rstrip("\n").rsplit("\n", 1)[-1].strip()
-                    if last_line == ">" and cmd in text:
-                        if prompt_seen_at is None:
-                            prompt_seen_at = time.time()
-                    else:
-                        prompt_seen_at = None
-
-                return "".join(chunks)
-            finally:
-                self.cmd_pending.clear()
+        return self._channel.send(cmd, timeout_ms)
 
     # Bridge parameter methods
     def read_all_bridge(self):
@@ -3462,43 +2875,18 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
         'commands.write_field' and 'cli_key' come from env_model.json, so a different
         firmware variant only needs a different model file and no patch here.
         """
-        env = self.env_entry()
-        fld = env.get("fields", {}).get(key)
-        if not fld:
-            return None
-        template = env.get("commands", {}).get("write_field", "setenv {cli_key} {value}")
-        return template.format(cli_key=fld["cli_key"], value=value)
-
+        return bridge_core.bridge_write_command(self.env_entry(), key, value)
     def parse_showenv(self, output: str, key: str, entry: Optional[dict] = None) -> Optional[str]:
         """Extract one value from the showenv output -- using the pattern from the model.
 
         'entry' allows passing in the model entry instead of taking the GUI's current
         one: the worker has already resolved the identity from this same output.
-
-        'reads_as' maps the device's display value to the value setenv expects
-        (mirror reports ON/OFF, what gets written is 1/0). Without it, the GUI would
-        show a word that can't be written back.
         """
-        env = self.env_entry() if entry is None else entry
-        fld = env.get("fields", {}).get(key)
-        if not fld or not fld.get("pattern"):
-            return None
-        m = re.search(fld["pattern"], output)
-        if not m:
-            return None
-        raw = m.group(1)
-        return fld.get("reads_as", {}).get(raw, raw)
-
+        return bridge_core.parse_showenv(
+            self.env_entry() if entry is None else entry, output, key)
     def parse_env_identity(self, output: str) -> Optional[dict]:
         """Die Kennungszeile von showenv auswerten (Muster: env_model.json 'identity')."""
-        ident = self.env_model.get("identity", {})
-        if not ident.get("pattern"):
-            return None
-        m = re.search(ident["pattern"], output)
-        if not m:
-            return None
-        return dict(zip(ident.get("groups", []), m.groups()))
-
+        return bridge_core.parse_env_identity(self.env_model, output)
     def save_bridge_json(self):
         """Save bridge parameters to JSON"""
         self.config["bridge"] = {}
@@ -3593,25 +2981,10 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
 
             failed = []
             for n, addr in enumerate(addrs, 1):
-                # Up to 2 retries: back-to-back 'lan_read' can occasionally outrun the
-                # LAN865x SPI transaction ("ERROR: Previous LAN operation still in
-                # progress" - a real, transient busy state, not a bug), or lose a rare
-                # race against send_command_via_link()'s prompt-settle window. Neither
-                # reproduces on a fresh attempt a few ms later, so retrying is cheap and
-                # far better than either slowing every read down or reporting a false
-                # "no response" - confirmed 2026-09-04 (repeated bulk reads against the
-                # same board show a different 0-4 addresses failing each time, not a
-                # consistent set, which is what a real per-register issue would look
-                # like instead).
-                value = ""
-                for attempt in range(3):
-                    output = self.send_command_via_link(f"lan_read {addr}")
-                    value = self.cli.parse_register_read(output)
-                    if not value:
-                        m = re.search(r'Value=(0x[0-9A-Fa-f]+)', output)
-                        value = m.group(1) if m else ""
-                    if value:
-                        break
+                # Retries included - see bridge_core.read_register_value for why a
+                # back-to-back read loop needs them and why they are not papering
+                # over a bug.
+                value = bridge_core.read_register_value(self._channel, addr)
 
                 if value:
                     self.result_queue.put(("register_read", addr, True, value))
@@ -3722,26 +3095,16 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
     # Test mode methods
     def read_testmode(self):
         """Read current test mode"""
-        self.run_async_cmd("lan_read 0x000308FB")
-
+        self.run_async_cmd(f"lan_read {bridge_core.TESTMODE_REGISTER}")
     def apply_testmode(self, mode: int):
         """Start the given test mode (0 = back to normal).
 
-        Modes 1-4 each have their own auto-revert field on the Test Modes tab; mode 0 has
-        none, since "return to normal" has no duration to set. An empty field means the
-        mode runs until something else changes it, matching what the firmware's own
-        `testmode <mode>` (no timeout argument) does.
+        Modes 1-4 each have their own auto-revert field on the Test Modes tab; mode 0
+        has none, since "return to normal" has no duration to set.
         """
         timeout_var = getattr(self, "testmode_timeout_vars", {}).get(mode)
-        timeout = timeout_var.get().strip() if timeout_var else ""
-
-        cmd = f"testmode {mode}"
-        if timeout:
-            cmd += f" {timeout}"
-
-        self.run_async_cmd(cmd)
-
-
+        timeout = timeout_var.get() if timeout_var else ""
+        self.run_async_cmd(bridge_core.testmode_command(mode, timeout))
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--light", action="store_true", help="use the light variant instead of dark")

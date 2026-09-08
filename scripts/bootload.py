@@ -33,7 +33,6 @@ not in scripts/requirements.txt.
 
 import argparse
 import socket
-import ssl
 import struct
 import sys
 import time
@@ -49,24 +48,23 @@ USER_PAGE_ADDR = 0x00804000                # fuses - never sent, only inspected
 RELEASE_HEX = Path(__file__).parent.parent / "release" / "bridge_lan865x_100baseT.hex"
 
 # Both the console (Telnet, TCP/23) and the image data port (TCP/5567) require
-# TLS with a client certificate now - see net_pres_enc_glue.c and
-# bridge_gui_telnet.py's _wrap_telnet_tls(), which this mirrors. Same CA/
-# client identity, same OP_LEGACY_SERVER_CONNECT workaround (confirmed live
-# against real hardware: this embedded wolfSSL build doesn't send the RFC 5746
-# renegotiation_info extension, which OpenSSL 3.x otherwise insists on).
-TLS_CA_CERT = Path(__file__).parent.parent / "certs" / "ca" / "ca_cert.pem"
-TLS_CLIENT_CERT = Path(__file__).parent.parent / "certs" / "client" / "client_cert.pem"
-TLS_CLIENT_KEY = Path(__file__).parent.parent / "certs" / "client" / "client_key.pem"
-
-
-def _wrap_tls(sock, host):
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_verify_locations(cafile=str(TLS_CA_CERT))
-    ctx.load_cert_chain(certfile=str(TLS_CLIENT_CERT), keyfile=str(TLS_CLIENT_KEY))
-    ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
-    return ctx.wrap_socket(sock, server_hostname=host)
+# TLS with a client certificate - see net_pres_enc_glue.c. The handshake, the
+# three paths and the OP_LEGACY_SERVER_CONNECT workaround all live in
+# bridge_core (stdlib-only, so importing it costs this command-line tool
+# nothing), shared with both front ends.
+#
+# This file used to carry its own copy, and that copy cost a bench session:
+# without certs/client/ it failed inside OpenSSL with a bare "[Errno 2] No such
+# file or directory" and NO filename, which Console.open() then retried three
+# times before re-raising - twelve seconds to arrive at an error naming nothing.
+# bridge_core's version checks the three paths itself and names the one that is
+# missing.
+from bridge_core import (                                       # noqa: E402
+    TLS_CA_CERT,
+    TLS_CLIENT_CERT,
+    TLS_CLIENT_KEY,
+    _wrap_telnet_tls as _wrap_tls,
+)
 
 LOGIN_TIMEOUT = 10.0
 REPLY_TIMEOUT = 5.0
