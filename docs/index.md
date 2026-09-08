@@ -24,6 +24,7 @@ project was built, why particular decisions were made, and what was measured.
 | debug a board live with pyOCD (breakpoints, fault postmortems, recovery resets) | [`pyocd-agent-debugging-guide.md`](pyocd-agent-debugging-guide.md) |
 | flash a board over the network instead of with a debug probe | [`bootload-agent-flashing-guide.md`](bootload-agent-flashing-guide.md) |
 | set up TLS on a fresh checkout, or start a bench over: which certificates exist, which have to be created and pushed | [`pki-clean-start.md`](pki-clean-start.md) |
+| know what TLS, certificates and MQTT cost in flash, RAM, heap and CPU | [`resource-cost-tls-mqtt.md`](resource-cost-tls-mqtt.md) |
 | find out why something is the way it is | [`session-log.md`](session-log.md) |
 | pick a screenshot without opening every file | [`images/index.md`](images/index.md) |
 
@@ -118,6 +119,18 @@ mechanism instead of a debug probe: the `bootload.py` command and what a healthy
 run looks like, what a wedged board's Telnet-connect failure means and how to
 recover it (a plain SWD reset, not a flash), and why this path is preferred over
 `flash.bat`/pyOCD whenever a board is network-reachable.
+
+### [`resource-cost-tls-mqtt.md`](resource-cost-tls-mqtt.md) — what TLS actually costs
+*The question the TLS branch exists to answer, measured rather than estimated.*
+Flash and static RAM broken down per module from the linker map (wolfSSL is
+39.7 % of the image; its static RAM is 112 bytes); the 160 KB heap — who takes
+it, what the TCP/IP stack's own 96 KB is doing there, live `heapinfo`
+watermarks, and per-structure heap demand of a handshake from the build's own
+DWARF; and CPU load per main-loop slot, including the measurement that matters
+most: one mutual-TLS handshake is ~139 M cycles, of which a single
+uninterruptible 745 ms RSA operation stalls the whole round-robin loop. Ends
+with what could not be measured and how to measure it, plus a ranked list of
+where to cut.
 
 ### [`pki-clean-start.md`](pki-clean-start.md) — from a fresh checkout to a provisioned bench
 *Read this before wondering why the TLS tools do not work on a new clone.* Which
