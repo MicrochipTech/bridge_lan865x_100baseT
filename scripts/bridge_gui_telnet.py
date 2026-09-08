@@ -2057,7 +2057,49 @@ class BridgeGUITelnet:
 
         self.mqtt_status_var = tk.StringVar(value="stopped")
         ttk.Label(top, textvariable=self.mqtt_status_var, foreground="blue").grid(
-            row=1, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+            row=1, column=0, columnspan=7, sticky=tk.W, pady=(4, 0))
+
+        # The other half of the job: the boards are MQTT *clients*, and each one
+        # only starts publishing once its 'mqtt_broker' command has been given
+        # over its own console - a per-board, runtime-only setting. Doing that
+        # by hand means one Telnet session per board, so the same discovery
+        # panel the Certificates tab has is here too, with "start the client"
+        # as its action. Deliberately the same broadcast discovery, not a
+        # separate mechanism (see discover.py).
+        boards = ttk.LabelFrame(frame, text="Boards on network - start their MQTT client remotely",
+                                padding=5)
+        boards.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        board_btns = ttk.Frame(boards)
+        board_btns.pack(fill=tk.X, pady=(0, 4))
+        self.mqtt_discover_button = ttk.Button(board_btns, text="Discover Boards",
+                                               command=self.mqtt_discover_boards)
+        self.mqtt_discover_button.pack(side=tk.LEFT)
+        self.mqtt_client_button = ttk.Button(board_btns, text="Start MQTT Client on Selected Board",
+                                             command=self.mqtt_start_client_selected)
+        self.mqtt_client_button.pack(side=tk.LEFT, padx=(4, 12))
+        ttk.Label(board_btns, text="via:").pack(side=tk.LEFT, padx=(0, 4))
+        # "auto" is the useful default and not a guess: the discovery reply
+        # carries the MAC of the interface that answered US, and 'showenv'
+        # lists both interfaces' MACs - so the interface facing the PC can be
+        # identified rather than assumed. The firmware's own default is eth1,
+        # which is wrong for any board reaching the PC through the bridge's T1S
+        # side (Follower B has no 100BASE-TX PHY at all: RemoteBind fails).
+        self.mqtt_iface_var = tk.StringVar(value="auto")
+        ttk.Combobox(board_btns, textvariable=self.mqtt_iface_var, width=6, state="readonly",
+                     values=("auto", "eth0", "eth1")).pack(side=tk.LEFT)
+
+        mqtt_board_columns = ("ip", "mac", "via", "state")
+        self.mqtt_boards_tree = ttk.Treeview(boards, columns=mqtt_board_columns,
+                                             show="headings", height=4)
+        for col, width in (("ip", 110), ("mac", 140), ("via", 60), ("state", 420)):
+            self.mqtt_boards_tree.heading(col, text=col)
+            self.mqtt_boards_tree.column(col, width=width, stretch=(col == "state"))
+        self.mqtt_boards_tree.pack(fill=tk.X, side=tk.LEFT, expand=True)
+        mqtt_boards_scroll = ttk.Scrollbar(boards, orient=tk.VERTICAL,
+                                           command=self.mqtt_boards_tree.yview)
+        mqtt_boards_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mqtt_boards_tree.config(yscrollcommand=mqtt_boards_scroll.set)
 
         paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
@@ -2091,6 +2133,111 @@ class BridgeGUITelnet:
         self.mqtt_log.insert(tk.END, "[%s] %s\n" % (time.strftime("%H:%M:%S"), text))
         self.mqtt_log.see(tk.END)
         self.mqtt_log.config(state=tk.DISABLED)
+
+    def mqtt_discover_boards(self):
+        """Same broadcast discovery as the Certificates tab, minus the TLS
+        pass: here the boards' fingerprints are irrelevant, only where they are
+        and which interface answered (that MAC is what makes "via: auto" work
+        below)."""
+        base_ip = self.ip_var.get().strip()
+        if not base_ip:
+            messagebox.showinfo("No base IP", "Enter any IP on the target /24 in the IP field above first.")
+            return
+        self.mqtt_boards_tree.delete(*self.mqtt_boards_tree.get_children())
+        self.mqtt_discover_button.config(state=tk.DISABLED, text="Discovering...")
+        self._mqtt_log("Broadcasting on %s.255..." % ".".join(base_ip.split(".")[:3]))
+
+        def worker():
+            try:
+                rows = [(r["ip"], r["mac"], "", "") for r in discover.broadcast_discover(base_ip)]
+                self.result_queue.put(("mqtt_boards", rows))
+            except Exception as e:
+                self.result_queue.put(("mqtt_log", "Discovery failed: %s" % e))
+                self.result_queue.put(("mqtt_boards", []))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _mqtt_iface_for(self, console, mac):
+        """Which interface name the given MAC belongs to, from 'showenv':
+
+            eth0  mac 00:04:25:CA:CE:D9
+            eth1  mac 00:04:25:CA:CE:DA  (applied at boot)
+
+        The MAC comes from the board's own discovery reply, so it is the
+        interface that reached this PC - exactly the one 'mqtt_broker -i' has
+        to pin. Returns None if the reply cannot be matched, and the caller
+        falls back to the firmware's own default rather than guessing."""
+        text = console.command_text("showenv", markers=(b"plca",))
+        want = mac.strip().upper()
+        for line in text.replace("\r", "\n").split("\n"):
+            parts = line.split()
+            if len(parts) >= 3 and parts[0].startswith("eth") and parts[1] == "mac":
+                if parts[2].upper() == want:
+                    return parts[0]
+        return None
+
+    def mqtt_start_client_selected(self):
+        """Give one board its broker address over its own Telnet console -
+        'mqtt_broker <ip> <port> -i <iface>' - and read back what came of it.
+
+        The broker address is this PC as seen FROM that board
+        (discover.local_ip_toward), not the Bind IP field: 0.0.0.0 means
+        "listen everywhere" here and is not an address a board can connect to,
+        and this bench PC has two addresses in the same /24 anyway. An explicit
+        bind address is used as-is, since then that is the only one that
+        answers.
+
+        Runtime only, like the console command it wraps: a board reset forgets
+        it again."""
+        sel = self.mqtt_boards_tree.selection()
+        if not sel:
+            messagebox.showinfo("No selection", "Discover the boards first, then select one.")
+            return
+        ip, mac, _via, _state = self.mqtt_boards_tree.item(sel[0], "values")
+        try:
+            port = int(self.mqtt_port_var.get().strip())
+        except ValueError:
+            messagebox.showerror("MQTT", "Port must be a number.")
+            return
+        if not self.mqtt_service.is_running():
+            if not messagebox.askyesno(
+                    "Broker not running",
+                    "The broker is not started, so the board will retry until it is.\n\n"
+                    "Send the command anyway?"):
+                return
+
+        bind_ip = self.mqtt_bind_var.get().strip()
+        broker_ip = bind_ip if bind_ip and bind_ip != "0.0.0.0" else discover.local_ip_toward(ip)
+        choice = self.mqtt_iface_var.get()
+        user = self.telnet_user_var.get()
+        password = self.telnet_password_var.get()
+        row = sel[0]
+
+        def worker():
+            try:
+                c = bootload.Console(ip, user, password)
+                c.open()
+                try:
+                    iface = choice
+                    if choice == "auto":
+                        iface = self._mqtt_iface_for(c, mac) or "eth1"
+                    reply = c.command("mqtt_broker %s %d -i %s" % (broker_ip, port, iface),
+                                      markers=(b"MQTT:",))
+                    self.result_queue.put(("mqtt_log", "%s: %s" % (ip, reply)))
+                    # The client connects from its own task; asking immediately
+                    # would only ever report "connecting".
+                    time.sleep(2.0)
+                    state = c.command("mqtt_status", markers=(b"MQTT:",))
+                finally:
+                    c.close()
+                self.result_queue.put(("mqtt_client_started", row, iface, state))
+            except Exception as e:
+                self.result_queue.put(("mqtt_log", "%s: ERROR: %s" % (ip, e)))
+                self.result_queue.put(("mqtt_client_started", row, "", "failed"))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.mqtt_client_button.config(state=tk.DISABLED, text="Starting...")
+        self._mqtt_log("Pointing %s at %s:%d (via %s)..." % (ip, broker_ip, port, choice))
 
     def mqtt_create_identity(self):
         """The broker's own TLS server identity (certs/mqtt/), signed by the
@@ -2932,6 +3079,28 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     _, text = result
                     if hasattr(self, 'cert_output'):
                         self._cert_log(text)
+
+                elif result[0] == "mqtt_log":
+                    self._mqtt_log(result[1])
+
+                elif result[0] == "mqtt_boards":
+                    _, rows = result
+                    self.mqtt_boards_tree.delete(*self.mqtt_boards_tree.get_children())
+                    for values in rows:
+                        self.mqtt_boards_tree.insert("", tk.END, values=values)
+                    self.mqtt_discover_button.config(state=tk.NORMAL, text="Discover Boards")
+                    self._mqtt_log("Discovery done: %d board%s found"
+                                   % (len(rows), "" if len(rows) == 1 else "s"))
+
+                elif result[0] == "mqtt_client_started":
+                    _, row, iface, state = result
+                    if self.mqtt_boards_tree.exists(row):
+                        values = list(self.mqtt_boards_tree.item(row, "values"))
+                        values[2], values[3] = iface, state
+                        self.mqtt_boards_tree.item(row, values=values)
+                    self.mqtt_client_button.config(state=tk.NORMAL,
+                                                   text="Start MQTT Client on Selected Board")
+                    self._mqtt_log(state)
 
                 elif result[0] == "mqtt_start_failed":
                     _, error = result

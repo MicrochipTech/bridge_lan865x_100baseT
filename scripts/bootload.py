@@ -230,6 +230,15 @@ class Console:
                 return line.strip()
         return text.strip()
 
+    def command_text(self, cmd, markers, timeout=REPLY_TIMEOUT):
+        """Like command(), but returns everything captured up to the marker
+        instead of the single line carrying it - for a multi-line reply such
+        as 'showenv', where the interesting part is spread over several lines
+        and the marker only says "the reply is complete"."""
+        self.buf = b""
+        self.sock.sendall(cmd.encode("latin-1") + b"\r")
+        return self._until(list(markers), timeout).decode("latin-1", "ignore")
+
 
 def _peek(console, addr):
     reply = console.command("peek 0x%08X 4" % addr, markers=(b"0x%08X:" % addr,))

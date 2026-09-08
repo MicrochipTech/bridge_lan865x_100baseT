@@ -81,6 +81,15 @@ def _local_ip_for(target_ip: str) -> str:
         s.close()
 
 
+def local_ip_toward(target_ip: str) -> str:
+    """This PC's address as seen from target_ip - i.e. what to tell a board to
+    connect back to (an MQTT broker address, say). Public name for the route
+    lookup broadcast_discover() needs internally; on a multi-homed bench PC
+    "the PC's IP" is not a single answer, and this is the one that is right
+    for that particular board."""
+    return _local_ip_for(target_ip)
+
+
 def _directed_broadcast(base_ip: str) -> str:
     """192.168.0.12 -> '192.168.0.255' - same /24-only assumption as
     _subnet_from_base_ip below. A directed broadcast (not 255.255.255.255)
