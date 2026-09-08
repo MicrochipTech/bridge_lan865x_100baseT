@@ -57,7 +57,7 @@ Two numbers deserve a second look:
 NET_PRES/glue 4.4 K + `cert_provision.o` 5.7 K + `app_mqtt.o` 2.7 K + the Paho
 codec 1.5 K = **~161 KB, 44 % of the image**. `ecc.o`, `des3.o` and parts of
 `asn.o` are linked but unreachable for the cipher suites actually negotiated -
-a first, safe reduction if flash ever becomes the constraint (see §6).
+a first, safe reduction if flash ever becomes the constraint (see §7).
 
 ## 2. Static RAM
 
@@ -369,7 +369,73 @@ per-line framing and flow control rather than cryptography.
 the TCP/IP stack (828 + 887 cycles per 2,984-cycle pass), not to anything
 security-related.
 
-## 5. Summary
+## 5. The crypto hardware this build does not use
+
+The measurements above are all of *software* crypto. The part underneath has
+four crypto blocks, and this firmware touches none of them. From the device
+header (`packs/ATSAME54P20A_DFP/same54p20a.h`):
+
+| Block | Where | What it is |
+|---|---|---|
+| **AES** | `0x42002400`, IRQ 130 | AES-128/192/256 in hardware |
+| **TRNG** | `0x42002800`, IRQ 131 | true random number generator |
+| **ICM** | `0x42002c00`, IRQ 132 | Integrity Check Monitor - SHA over memory regions |
+| **PUKCC** | IRQ 133, `ID_PUKCC = 76` | Public Key Cryptography Controller |
+
+PUKCC has no `PUKCC_REGS` in the header on purpose: it is not driven through
+user registers but through the **PUKCL library, which sits in ROM inside the
+device**, with its parameters passed in a dedicated 4 KB Crypto RAM. Per the
+data sheet, [§43.1](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-85A335EF-0029-47C3-B3B1-05A040D0F82D.html),
+it implements RSA/DSA modular exponentiation **with CRT up to 7168 bits**
+(without CRT up to 5376), prime generation, and ECDSA over GF(p) up to
+521 bits - RSA-2048 with CRT is comfortably inside that range.
+[§43.3.1](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-8D532BF9-2B97-4A52-AEB7-33EDA9490E02.html)
+says in as many words that the library "can be used in conjunction with a SSL
+software stack to improve performance and helps to reduce the RAM usage and
+time taken to perform different cryptographic functions".
+
+**Verified unused here:** outside the pack headers, the only references to
+`AES_REGS`, `ICM_REGS`, `TRNG_REGS` or `PUKCC` in the whole source tree are the
+interrupt vector tables (`device_vectors.h`, `interrupts.c`) - i.e. empty
+handler slots. The 745 ms of §4.2 is wolfSSL's software RSA
+(`sp_cortexm.o`, the 19.7 KB of hand-written Cortex-M assembly from §1) doing
+the modular exponentiation on the core.
+
+**The plumbing is half-built already**, which is why this is worth writing
+down rather than filing away: `WOLF_CRYPTO_CB` (wolfSSL's crypto-callback
+framework) is already defined in `configuration.h`, and the vendored wolfSSL
+carries the PUKCC port - `third_party/wolfssl/wolfssl/wolfcrypt/port/pic32/CryptoLib_*.h`
+is exactly the PUKCL interface.
+
+Three caveats before anyone reads this as a free win:
+
+1. **PUKCL is not a DMA-style offload.**
+   [§43.3.8](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-2CF0C526-FE9E-4BE9-BEA2-C192956C7507.html):
+   "This library is using the main core to execute its computations, and
+   therefore is also sharing some resources with the application." The
+   handshake would get faster; the blocking call would get *shorter*, not
+   disappear. Every timeout tuned around the current 745 ms would want
+   re-checking rather than removing.
+2. **It has its own setup requirements**: a wait for the Crypto RAM clear
+   (`PUKCCSR & BIT_PUKCCSR_CLRRAM_BUSY`) and a mandatory SelfTest at init
+   ([§43.3.3.1](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-7C82F552-E5A2-4284-AC7B-EB861635D1B4.html)),
+   parameters that must live in the 4 KB Crypto RAM, and stack of its own
+   (ExpMod 200 bytes, CRT 304 bytes - and see §3.4 on how little stack
+   headroom is designed rather than left over).
+3. **The data sheet's own numbers are the thing to look up first.**
+   [§43.3.8](https://onlinedocs.microchip.com/oxy/GUID-F5813793-E016-46F5-A9E2-718D8BCED496-en-US-15/GUID-2CF0C526-FE9E-4BE9-BEA2-C192956C7507.html)
+   carries a "Service Timing for RSA" table with estimated performance at
+   120 MHz. Its values are deliberately **not** reproduced here - they could
+   not be extracted reliably at the time of writing, and a guess is worse
+   than a pointer. That table against the measured 745 ms is the decision.
+
+AES and ICM are the smaller prizes. Per §4.3 the per-byte cost of an
+established connection is dominated by the console's per-line framing, not by
+the cipher, so hardware AES would move a few percent of a number that is
+already not the problem. TRNG is the one that may matter for correctness
+rather than speed if wolfSSL's entropy source is ever revisited.
+
+## 6. Summary
 
 | Resource | Total | TLS/cert/MQTT share |
 |---|---:|---|
@@ -386,7 +452,7 @@ connection counts this firmware allows. The per-byte cost of an established
 connection is dominated by the console path around the cipher, not by the
 cipher.
 
-## 6. If any of this has to come down
+## 7. If any of this has to come down
 
 Roughly in order of return per unit of risk:
 
@@ -407,10 +473,13 @@ Roughly in order of return per unit of risk:
    instrument wolfSSL's allocations first (§3.3 box). Do not cut this one on
    arithmetic alone.
 6. **The 745 ms handshake stall** is not a memory problem but it is the
-   sharpest edge here. The options are a smaller key (ECDSA P-256 instead of
-   RSA-2048 - `ecc.o` is already linked), or accepting it and making sure
-   every timeout in the system is set above it, which is what the host-side
-   tooling does today.
+   sharpest edge here. In order of expected return: hand the modular
+   exponentiation to the **PUKCC** the part already has and this build
+   ignores (§5) - the wolfSSL crypto-callback framework and the PUKCL port are
+   both already in the tree; or use a smaller key (ECDSA P-256 instead of
+   RSA-2048 - `ecc.o` is already linked, and PUKCC does ECDSA too); or accept
+   it and keep every timeout in the system above it, which is what the
+   host-side tooling does today.
 
 ## Related
 

@@ -128,9 +128,12 @@ it, what the TCP/IP stack's own 96 KB is doing there, live `heapinfo`
 watermarks, and per-structure heap demand of a handshake from the build's own
 DWARF; and CPU load per main-loop slot, including the measurement that matters
 most: one mutual-TLS handshake is ~139 M cycles, of which a single
-uninterruptible 745 ms RSA operation stalls the whole round-robin loop. Ends
-with what could not be measured and how to measure it, plus a ranked list of
-where to cut.
+uninterruptible 745 ms RSA operation stalls the whole round-robin loop, and
+the per-byte cost of an established connection, which turns out to be the
+console path rather than the cipher. Also names the four crypto blocks the
+SAME54 has and this build ignores — AES, TRNG, ICM and the PUKCC public-key
+accelerator whose wolfSSL port is already vendored here. Ends with what could
+not be measured and how to measure it, plus a ranked list of where to cut.
 
 ### [`pki-clean-start.md`](pki-clean-start.md) — from a fresh checkout to a provisioned bench
 *Read this before wondering why the TLS tools do not work on a new clone.* Which
