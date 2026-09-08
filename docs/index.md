@@ -50,10 +50,11 @@ make the MAC bridge forward. This is the document to follow if you want to
 reproduce the bridge in your own project rather than clone this one.
 
 ### [`development-notes.md`](development-notes.md) — rules and workflow for maintainers
-*202 lines.* The hard rules this codebase follows — first among them that
+*251 lines.* The hard rules this codebase follows — first among them that
 MCC-generated code under `firmware\src\config\default\` is never hand-edited
 as the actual fix — plus the day-to-day build/flash workflow and a dated list
-of MCC-regeneration pitfalls that each cost real debugging time. Read before
+of MCC-regeneration pitfalls that each cost real debugging time, followed by
+the same kind of list for the PC-side tools under `scripts\`. Read before
 changing anything in the project.
 
 ### [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md) — every hand-patch, and why

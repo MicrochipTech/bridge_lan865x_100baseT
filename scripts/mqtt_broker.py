@@ -33,6 +33,7 @@ aborts the handshake itself.
 
 import asyncio
 import queue
+import socket
 import ssl
 import threading
 import time
@@ -112,6 +113,31 @@ class GuiEventsPlugin(BasePlugin[BaseContext]):
         _event_queue.put(("message", (client_id, message.topic, bytes(message.data)), time.time()))
 
 
+def port_in_use(bind_ip: str, port: int) -> bool:
+    """Whether something is ALREADY listening on that address.
+
+    Not a nicety: amqtt binds its listener with `reuse_address=True`
+    (broker.py's _create_server_instance), and on Windows SO_REUSEADDR does not
+    mean "share" but "bind on top of an existing listener" - the bind succeeds,
+    no error is raised, and the process silently ends up with a listening socket
+    that never receives anything, because established connections and (in
+    practice) new ones stay with the first binder. Measured 2026-09-08: a
+    console `python scripts/mqtt_broker.py` left over from hours earlier held
+    all three boards, while the GUI's own broker reported "started" and showed
+    an empty client list forever.
+
+    SO_REUSEADDR is deliberately NOT set on the probe - that is exactly what
+    makes the conflict visible here (same reasoning as bridge_web_telnet.py's
+    port_in_use, for the web port).
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((bind_ip, port))
+        except OSError:
+            return True
+    return False
+
+
 class MqttBrokerService:
     """Start/stop the broker from a normal (non-asyncio) thread - the shape
     bridge_gui_telnet.py's Tk main loop needs."""
@@ -138,6 +164,11 @@ class MqttBrokerService:
         if not pki.MQTT_BROKER_CERT_PATH.is_file() or not pki.MQTT_BROKER_KEY_PATH.is_file():
             raise BrokerError(
                 "no MQTT broker identity - run: python scripts/pki.py issue-mqtt-broker")
+        if port_in_use(bind_ip, port):
+            raise BrokerError(
+                "%s:%d is already in use - another MQTT broker is listening there "
+                "(a second copy of this tool, or a console 'python scripts/mqtt_broker.py'). "
+                "Close it first: netstat -ano | findstr :%d" % (bind_ip, port, port))
 
         self._start_error = None
         self._running.clear()

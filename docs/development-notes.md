@@ -1,9 +1,10 @@
 # Development Notes
 
 Technical background for anyone maintaining or extending this project: the hard
-rules this codebase follows, the day-to-day build/flash workflow, and a dated
+rules this codebase follows, the day-to-day build/flash workflow, a dated
 log of MCC-regeneration pitfalls that cost real debugging time the first time
-around. For the full narrative behind any entry below, see
+around, and the same for the PC-side tools under `scripts\`. For the
+full narrative behind any entry below, see
 [`session-log.md`](session-log.md); for the patch mechanism itself, see
 [`mcc-generated-code-patches.md`](mcc-generated-code-patches.md).
 
@@ -205,6 +206,43 @@ cli.bat --port COM8 --read 3 "reset"
   frame length" undercounts by exactly the header size — invisible for
   small frames, very visible for anything spanning more than one lower-level
   transfer chunk.
+
+---
+
+## 4. Known host-tool pitfalls (Windows, Python)
+
+Sections 1-3 are about the firmware. These are about the PC-side tools under
+`scripts\` - same category of entry, different machine.
+
+- **On Windows, a second `bind()` to a port that is already in use can
+  SUCCEED, silently.** `SO_REUSEADDR` does not mean "share the port" there,
+  it means "bind on top of an existing listener" - no error, no warning, and
+  established connections plus (in practice) new ones stay with the *first*
+  binder. amqtt creates its listener with `reuse_address=True`
+  (`Broker._create_server_instance`), so a second MQTT broker in a second
+  process comes up perfectly happily and then never sees a single client.
+  Observed 2026-09-08: a console `python scripts\mqtt_broker.py` left running
+  from hours earlier held all three boards, while the web front end's own
+  broker reported "listening on 0.0.0.0:8883", logged nothing further, and
+  showed an empty "Connected clients (live)" table. `netstat -ano | findstr
+  :8883` showed the two LISTENING sockets under different PIDs, which is what
+  finally identified it - the packet capture only proved the boards were
+  talking to *something* on this PC. Fix:
+  `mqtt_broker.port_in_use()`, a probe bind **without** `SO_REUSEADDR` (the
+  omission is the whole mechanism), called from `MqttBrokerService.start()`
+  so the front ends get a `BrokerError` naming the conflict instead of a
+  ghost listener. `bridge_web_telnet.py` already did the same thing for its
+  own HTTP port; the broker did not.
+- **Comparing shared state against what a widget already holds only detects
+  changes if the two sides are not the same objects.** `bridge_web_telnet.py`'s
+  `mirror_table()` refreshes a NiceGUI table from a per-client timer by
+  testing `table.rows != rows_of()`. The pump mutates its row dicts in place
+  (`mqtt_clients[id]["last_seen"]`, `mqtt_board_state`'s `row["state"]`), so
+  handing the table the live dicts left both sides of `!=` pointing at the
+  same objects - equal forever. Only added and removed rows ever reached the
+  browser; cell updates within an existing row never did. Fix: hand the table
+  shallow copies (`[dict(r) for r in rows_of()]`), so the next tick's fresh
+  copies genuinely differ from what the table holds.
 
 ---
 

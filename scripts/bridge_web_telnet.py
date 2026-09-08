@@ -1558,9 +1558,16 @@ def mirror_table(table: ui.table, rows_of) -> None:
     tables are refreshed by a per-client timer that compares what it has against
     what the session holds. Cheap at 3 Hz for the handful of rows these tables ever
     carry, and it means two open tabs both stay current with no bookkeeping.
+
+    The rows handed to the table are COPIES, and that is the whole point of the
+    comparison working at all: the pump mutates its row dicts in place
+    (mqtt_clients[id]["last_seen"], mqtt_board_state's row["state"]), so handing
+    the table the live dicts would leave both sides of `!=` pointing at the same
+    objects - equal forever, and only added/removed rows would ever reach the
+    browser. Cell updates within a row would silently never show.
     """
     def sync():
-        rows = rows_of()
+        rows = [dict(r) for r in rows_of()]
         if table.rows != rows:
             table.rows = rows
             table.update()
