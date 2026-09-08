@@ -16,6 +16,13 @@ Everything here is measured on the image that is in `release\`, not estimated:
 Bench: the bridge board at 192.168.0.12, SAME54P20A at 120 MHz, measured
 2026-09-08. Where a number is derived rather than measured it says so.
 
+**Two builds appear in this document.** The *baseline* is the image in
+`release\` as of 2026-09-07 - all RSA in software - and it is what chapters 1
+to 4 measure. The *accelerated* build (branch `pukcc-rsa-offload`, same day)
+hands the TLS server role's RSA private-key operation to the PUKCC; its
+numbers are marked as such wherever they differ, and chapter 5 covers what
+that changed. Everything not marked is identical in both.
+
 ---
 
 ## 1. Flash
@@ -53,6 +60,12 @@ Two numbers deserve a second look:
   application. Not TLS's doing, but it is the cheapest 40 KB anyone will ever
   find in this image if flash gets tight.
 
+**Accelerated build:** 378,204 bytes, i.e. **+8,212 (+2.2 %)**, 74.5 % of the
+bank. That buys the PUKCC glue (`pukcc.c`), the verification vector
+(`pukcc_vector.h`, a 1,192-byte DER key plus two 256-byte values), and
+Microchip's PUKCL driver - which was being compiled into the baseline image
+too, just switched off, so most of its code was already being paid for.
+
 **What the TLS/cert/MQTT feature itself costs in flash:** wolfSSL 147.0 K +
 NET_PRES/glue 4.4 K + `cert_provision.o` 5.7 K + `app_mqtt.o` 2.7 K + the Paho
 codec 1.5 K = **~161 KB, 44 % of the image**. `ecc.o`, `des3.o` and parts of
@@ -85,6 +98,16 @@ Per module, and the individual objects that dominate:
 | NET_PRES + TLS glue | 968 | `net_pres.o` 932 |
 | **wolfSSL** | **112** | - |
 | toolchain / libc | 148 | - |
+
+**Accelerated build: 67,577 bytes, +6,861.** The heap keeps its fixed 163,840,
+so that increase comes out of the stack region, which drops from 37,584 to
+**30,720 bytes** - an 18 % cut in a reserve that, as §3.4 notes, is what is
+left over rather than a designed budget, and that PUKCL now also draws on
+(ExpMod 200 B / CRT 304 B per the data sheet). Of the 6,861, **4,516 are one
+`RsaKey` held statically by the `pukcc_bench` command** (`s_bench_key`); the
+rest is the vendored driver's own `exponent`/`modulus` scratch buffers plus
+this module's smaller statics. The benchmark key is pure diagnostic ballast
+and could be taken from the heap on demand instead - see §7.
 
 **wolfSSL's static footprint is 112 bytes.** That is the headline of this
 chapter and the reason chapter 3 exists: wolfSSL puts essentially everything
@@ -278,6 +301,8 @@ matches the 1.15-1.2 s wall-clock a lone handshake takes (`discover.py`'s
 `TLS_TIMEOUT` comment) - i.e. the handshake is not waiting on the network, it
 is *computing*, essentially flat out.
 
+(§4.4 repeats this measurement on the accelerated build: 519 ms.)
+
 **The number that matters operationally is the 745 ms one.** That is a single
 uninterruptible call inside one main-loop pass: the RSA-2048 private-key
 operation. For three quarters of a second the round-robin loop does not turn -
@@ -355,10 +380,47 @@ firmware update uses its own binary port instead of the console.
 > without changing the firmware, and they are an upper bound on the crypto
 > cost, not the crypto cost itself.
 
-### 4.4 So where does the compute actually go?
+### 4.4 The same handshake with the PUKCC
+
+The accelerated build hands only one thing to hardware - the RSA-2048 private
+operation in the TLS *server* role. Measured the same afternoon with
+192.168.0.21 and .31 left on the baseline image as controls, so both sides of
+this table come from the same method, the same bench and the same PC:
+
+| | baseline (software) | accelerated (PUKCC) | |
+|---|---:|---:|---:|
+| Handshake wall clock from the PC, median of 8 | 1.151 s / 1.133 s | **0.909 s** | -21 % |
+| CPU per handshake, `net_pres` slot | 91.1 M cycles | **72.2 M cycles** | -21 % |
+| Longest single blocking call | 746 ms | **519 ms** | -30 % |
+| Raw RSA-2048 private operation (`pukcc_bench`) | 454.4 ms | **226.6 ms** | -50 % |
+
+All 8/8 handshakes per board succeeded, and each benchmarked operation was
+checked against a fixed vector rather than only timed - a wrong Crypto RAM
+layout produces a fast wrong answer, which is how the first, hand-written
+attempt at this looked: 51.8 ms and incorrect.
+
+**On the per-handshake figure**: the control column here reads 91.1 M cycles,
+while §4.2 measured 139 M for the same software configuration. The difference
+is the window composition, not the board - §4.2 fits over 0/2/5 handshakes
+without pacing, this run over 0/3 with a pause between probes. The
+like-for-like comparison inside this table is the trustworthy part; do not
+subtract 72.2 from §4.2's 139.
+
+**Why only half on the operation itself.** The vendored driver performs the
+private operation with `MODE_NO_CRT` - the full private exponent against the
+modulus - even though wolfSSL's key carries p, q, dP, dQ. The CRT service the
+same driver uses elsewhere is roughly 4x faster again. That is the largest
+single lever still on the table; see `pukcc-acceleration-plan.md` §8.4.
+
+**What did NOT change**: the wire. Same TLS 1.2, same cipher suites, same
+certificates, bit-identical results - a client sees the same handshake, only
+sooner. AES, SHA, the RNG, public RSA operations and the whole MQTT *client*
+context still run in software, the last two deliberately (§5).
+
+### 4.5 So where does the compute actually go?
 
 **Per TLS connection: ~1.16 s of CPU, concentrated in a single 745 ms blocking
-RSA operation at setup.** That is the dominant cost by a wide margin and it is
+RSA operation at setup** - 519 ms on the accelerated build (§4.4). That is the dominant cost by a wide margin and it is
 asymmetric - the board pays it, the PC pays almost nothing.
 
 **Per byte afterwards: the cipher is cheap, but this firmware's console path
@@ -371,13 +433,13 @@ security-related.
 
 ## 5. The crypto hardware this build does not use
 
-> **Superseded on 2026-09-08 for RSA:** the PUKCC described below is now
-> actually used for the TLS server role's RSA private-key operation. Handshake
-> 1.15 s -> 0.91 s, longest blocking call 746 ms -> 519 ms, raw private
-> operation 454 ms -> 227 ms. What was built, what broke, and what is still
-> left on software: `docs/pukcc-acceleration-plan.md` §8. The rest of this
-> chapter is unchanged and still describes AES, ICM and TRNG, which remain
-> unused.
+> **Superseded for RSA on 2026-09-08:** the PUKCC described below is now
+> actually used, for the TLS *server* role's RSA private-key operation -
+> measurements in §4.4, cost in flash and RAM in §1 and §2. What was built,
+> what broke on the way, and what is still left on software:
+> `docs/pukcc-acceleration-plan.md` §8. The rest of this chapter is unchanged
+> and still describes AES, ICM and TRNG, which remain unused, and PUKCC's
+> remaining unused capabilities (ECDSA, and CRT for the private operation).
 
 The measurements above are all of *software* crypto. The part underneath has
 four crypto blocks, and this firmware touches none of them. From the device
@@ -447,11 +509,15 @@ rather than speed if wolfSSL's entropy source is ever revisited.
 
 | Resource | Total | TLS/cert/MQTT share |
 |---|---:|---|
-| Flash | 369,992 / 507,904 (73 %) | ~161 KB (44 % of the image) |
-| Static RAM | 60,716 / 262,144 (23 %) | ~5.2 KB (`cert_provision`) + 112 B (wolfSSL) |
+| Flash | 369,992 / 507,904 (73 %) — 378,204 (74.5 %) with the PUKCC | ~161 KB (44 % of the image) |
+| Static RAM | 60,716 / 262,144 (23 %) — 67,577 (26 %) with the PUKCC, stack reserve 37,584 → 30,720 | ~5.2 KB (`cert_provision`) + 112 B (wolfSSL) |
 | Heap | 163,840 committed | ~12-16 KB per handshake, derived; 96 KB is the TCP/IP stack's |
-| CPU, per connection | 40,200 loop passes/s idle | 1.16 s per handshake, 745 ms of it in one blocking call |
+| CPU, per connection | 40,200 loop passes/s idle | 1.16 s per handshake, 745 ms of it in one blocking call — 519 ms with the PUKCC (§4.4) |
 | CPU, per byte | plaintext TCP ~84 cycles/byte (iperf) | console over TLS 1,255 cycles/byte, CPU-bound at ~94 KB/s |
+
+Accelerating it changes that balance a little rather than a lot: the RSA
+offload costs 8.2 KB of flash and 6.9 KB of static RAM (4.5 KB of which is a
+diagnostic, §7) to take 30 % off the blocking call and 21 % off the handshake.
 
 TLS is a **flash-and-latency** cost on this part, not a RAM cost. It is the
 largest single thing in the image, it blocks the main loop for three quarters
@@ -475,12 +541,16 @@ Roughly in order of return per unit of risk:
    watermark under the heaviest workload that matters (iperf across the
    bridge, sniffer on). The stack reports its own peak, so this one can be
    done honestly.
-4. **`frame_data_pool` 24,292 bytes** of static RAM - the capture pool, only
+4. **`s_bench_key`, 4,516 bytes** of static RAM in `pukcc.c` - one `RsaKey`
+   held for the `pukcc_bench` diagnostic, which is most of what the accelerator
+   added to static RAM and directly shrinks the stack reserve. Taking it from
+   the heap for the duration of the command would give nearly all of it back.
+5. **`frame_data_pool` 24,292 bytes** of static RAM - the capture pool, only
    useful when the mirror/sniffer is in use.
-5. **The heap's non-TCP/IP 64 KB** - probably twice what is needed, but
+6. **The heap's non-TCP/IP 64 KB** - probably twice what is needed, but
    instrument wolfSSL's allocations first (§3.3 box). Do not cut this one on
    arithmetic alone.
-6. **The 745 ms handshake stall** is not a memory problem but it is the
+7. **The 745 ms handshake stall** is not a memory problem but it is the
    sharpest edge here. **Partly done** (2026-09-08): the modular exponentiation
    now runs on the PUKCC for the server role - 519 ms, and 227 ms for the raw
    operation. The remaining 4x is the vendored driver's non-CRT private path;
