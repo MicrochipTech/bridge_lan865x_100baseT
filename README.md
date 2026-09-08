@@ -173,6 +173,11 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
   port — same command set, same groups, its own login.
 - A parallel GUI tool (`run_gui_telnet.bat` / `scripts\bridge_gui_telnet.py`)
   connects over Telnet instead of the COM port.
+- A browser front end for the same connection
+  (`run_web_telnet.bat` / `scripts\bridge_web_telnet.py`) with all seven tabs.
+  Python still holds the TLS/Telnet link — a
+  browser cannot open a raw TCP socket to TCP/23 — and serves the page on
+  `127.0.0.1:8088`.
 
 ### Host-side tooling and build system
 
@@ -182,6 +187,15 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
   COM port (115200 8N1).
 - `run_gui.bat` / `run_gui_telnet.bat` — status/configuration GUIs, one per
   console transport.
+- `run_web_telnet.bat` — the same tool in a browser tab, all seven tabs including
+  flash/erase and the network firmware update. Shares its connection layer,
+  command protocol and models with the Tk GUI via `scripts\bridge_core.py`;
+  neither front end has its own copy of any of it. Flashing, the certificate
+  folders and the MQTT broker act on the machine running the server, not the one
+  running the browser.
+- `run_tests.bat` — the host-side tests that need no hardware: both front ends
+  against a simulated board (`scripts\test_bridge_core_sim.py`), and the web UI
+  against a simulated browser client (`scripts\test_web_ui.py`).
 - `run_term.bat` — three serial consoles (this bridge plus two T1S follower
   boards on this bench) in one window.
 - `scripts\iperf_matrix_test.py` — an `iperf` throughput matrix across PC,
@@ -545,7 +559,9 @@ cli.bat "stats" "netinfo"                    :: ad-hoc commands over the EDBG CO
 cli.bat --port COM8 --read 3 "reset"
 run_gui.bat                                   :: status/config GUI over the COM port
 run_gui_telnet.bat                            :: same GUI, over Telnet (TCP/23) instead
+run_web_telnet.bat                            :: the Telnet tool in a browser (http://127.0.0.1:8088)
 run_term.bat                                   :: this board + two T1S follower boards, one window
+run_tests.bat                                 :: host-side tests, no hardware needed
 ```
 
 ![Bridge Status & Configuration GUI (`run_gui.bat`/`run_gui_telnet.bat`): the Bridge Parameters tab, showing per-interface IP/mask/gateway/DNS/MAC, PLCA node id/count, and the Quick Commands panel (Environment read/write, Mirror/Sniffer toggles, stats, flashing).](docs/images/gui-bridge-parameters-tab-overview.png)

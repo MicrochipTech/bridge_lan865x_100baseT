@@ -35,3 +35,19 @@ cryptography==50.0.1
 # the "MQTT" tab in bridge_gui_telnet.py (used by: 2). hbmqtt, the older
 # project this was forked from, is unmaintained - do not substitute it in.
 amqtt==0.12.0
+
+# Browser front end: bridge_web_telnet.py (used by: 1). Only that one script
+# needs it - the Tk GUI, the CLI tools and bridge_core itself do not, so a
+# checkout that never opens the web UI can skip this line.
+#
+# Pulls FastAPI/uvicorn and ~35 further packages in turn. It also ships its own
+# xterm.js build (nicegui/elements/xterm/dist), which is why the web terminal
+# needs no CDN and works on a machine with no internet access.
+nicegui==3.16.0
+
+# TEST ONLY - run_tests.bat's second half (scripts/test_web_ui.py, NiceGUI's
+# simulated browser client). Nothing that ships needs these, and run_tests.bat
+# skips that suite with a note rather than failing if they are absent. The first
+# suite, scripts/test_bridge_core_sim.py, is stdlib-only and always runs.
+pytest==9.1.1
+pytest-asyncio==1.4.0
