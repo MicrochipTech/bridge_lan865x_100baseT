@@ -552,20 +552,39 @@ separate, explicit step (same "verify then commit then reboot" caution as
 bootload's own image swap).
 
 **`scripts/discover.py`** - finds boards on the local network segment, so
-the operator doesn't need to already know an IP to start with. A plain TCP
-connect + mutual-TLS handshake against port 23 across the local /24 (our CA,
-our shared client identity) - not mDNS: a responder would need a new
-Harmony component in every board's firmware (flash is already at 66% of
-budget, §3.1) and a fleet reflash, for a bench of a handful of boards where
-a plain scan takes a few seconds. Every completed handshake is matched
-against `pki.py`'s known fingerprints to show a `board_id` where one is
-known, `(unregistered)` otherwise. See §10.1 for the real bug this scan's
-own load surfaced in the TLS glue, and §10.2 for a board-address mixup this
-same testing turned up (unrelated to the scanner itself).
+the operator doesn't need to already know an IP to start with. One operation
+(`discover_boards()`), in two steps. First a small plaintext **UDP
+broadcast** query that the firmware answers for itself with its MAC+IP
+(`Discovery_Tasks()`, `firmware/src/app.c`) - one round trip, well under a
+second, and no traffic against addresses where no board lives. Then one
+TCP + **mutual-TLS handshake against each IP that answered** (our CA, our
+shared client identity, port 23), for the CA-verified fingerprint the
+broadcast has no way to prove; that fingerprint is matched against
+`pki.py`'s known ones to show a `board_id`, falling back to a match on IP
+and to `(unregistered)`. A board that answers the broadcast but completes
+no handshake is listed with its fingerprint column empty rather than
+dropped - that is precisely the factory-fresh board this tab exists to
+issue an identity to. Measured on the three-board bench: 4.9s end to end,
+the bulk of it the three ~1.2s RSA-2048 handshakes. Not mDNS - MCC's
+ZeroConf/mDNS-SD responder was tried and dropped after it asserted on
+essentially every query without ever answering one (see
+`docs/session-log.md`, 2026-09-06).
+
+The full /24 sweep is still in the module as `scan_subnet()`, but it is an
+escape hatch - `--tls-scan` only, no GUI button - for a board whose
+discovery responder is down or whose firmware predates it. It costs 254
+probes whose ARP broadcasts get bridged onto the T1S segment, which is what
+wedged the bench during this work: see §10.1 for the real bug that load
+surfaced in the TLS glue, and §10.2 for a board-address mixup the same
+testing turned up (unrelated to the scanner itself). `ping` sweeps are
+deliberately not used at all: ping is answered by the TCP/IP stack even
+when the application side is wedged, so it proves less than the broadcast
+does.
 
 **The "Certificates" tab** (`bridge_gui_telnet.py`, between Terminal and
 Help) ties all of it together: a "Discovered on network" panel
-(`discover.py`, a "Scan Network" button, click a result to load its IP into
+(`discover.py`, a single "Discover Boards" button, click a result to load
+its IP into
 the fields above) above a "Known boards" panel read from `pki.py`'s
 `json/boards/*.json`, CA status, "Issue New Board Identity" (calls
 `pki.issue_board_identity()`, defaulting the suggested id from the IP field

@@ -2,22 +2,41 @@
 """
 Find this project's boards on the local network segment.
 
-Standalone and GUI-free, like pki.py/bootload.py: a plain TCP+TLS subnet
-scan on port 23, not mDNS/DNS-SD. Chosen over mDNS deliberately - a mDNS
-responder would need a new Harmony component in every board's firmware
-(flash is already at 66% of budget, see docs/tls-poc-report.md §3.1) and a
-reflash of the whole fleet, for a bench of a handful of boards on one flat
-/24 where a plain scan takes a couple of seconds. Not implemented: crossing
-subnet boundaries, which mDNS would need a reflector for anyway.
+Standalone and GUI-free, like pki.py/bootload.py. One way to do it -
+discover_boards(), what both the CLI and the GUI's single "Discover Boards"
+button run - in two steps:
 
-A board is identified by completing our mutual-TLS handshake (our CA, our
-shared client identity) against port 23 - a bare "something answered on
-port 23" is not enough, since that proves nothing about *which* server is
-listening. Does not log in (no username/password sent): the handshake alone
-is enough to fingerprint the board and confirm it trusts our CA.
+  1. a small plaintext UDP broadcast query; the boards answer for
+     themselves with MAC+IP (broadcast_discover(), firmware Discovery_Tasks()
+     in firmware/src/app.c). Well under a second, and it touches no address
+     where no board lives.
+  2. one mutual-TLS handshake against each IP that actually answered, to
+     add the CA-verified fingerprint that step 1 has no way to prove.
+
+So the identifying information still comes from TLS, but the *addresses* it
+is asked of come from the boards themselves rather than from sweeping a
+subnet. A board is identified by completing our mutual-TLS handshake (our
+CA, our shared client identity) against port 23 - a bare "something
+answered on port 23" is not enough, since that proves nothing about *which*
+server is listening. Does not log in (no username/password sent): the
+handshake alone fingerprints the board and confirms it trusts our CA.
+
+The full /24 sweep (scan_subnet()) is still here but is an escape hatch,
+`--tls-scan` only, with no button in the GUI: it exists for a board whose
+discovery responder is down or whose firmware predates it. It is not free -
+every probe against an address where nothing lives is itself an ARP
+broadcast, this board bridges the scanned segment onto 10BASE-T1S, and an
+unpaced sweep has wedged the whole bench before (see its docstring). `ping`
+sweeps are not used anywhere here: ping is answered by the TCP/IP stack
+even when the application side is wedged, so it proves less than step 1.
+
+Not mDNS/DNS-SD - that was tried and dropped, see the Broadcast discovery
+block below.
 
     python scripts/discover.py --base-ip 192.168.0.12
-        # scans 192.168.0.1-254, port 23
+        # broadcast, then mTLS per answer: IP + MAC + fingerprint
+    python scripts/discover.py --base-ip 192.168.0.12 --tls-scan
+        # escape hatch: sweeps 192.168.0.1-254 on port 23 instead
 """
 
 import argparse
@@ -208,6 +227,38 @@ def _probe(ip: str, timeout: float = TLS_TIMEOUT):
     return {"ip": ip, "fingerprint_sha256": fp}, True
 
 
+def discover_boards(base_ip: str, timeout: float = 1.0, progress=None):
+    """The normal way to find boards: broadcast first, then talk TLS only to
+    what actually answered. Returns a list of {"ip", "mac",
+    "fingerprint_sha256"} dicts sorted by IP, where fingerprint_sha256 is
+    None for a board that answered the broadcast but did not complete our
+    mutual-TLS handshake (no identity from our CA yet, Telnet busy, or its
+    TLS side is wedged - all worth seeing in the list rather than hiding).
+    progress(done, total), if given, is called after each board's handshake.
+
+    Note what this deliberately does NOT do: touch a single address that no
+    board answered from. That is the whole difference to scan_subnet() below
+    - no /24 sweep, so no ARP broadcasts bridged onto the T1S segment, and
+    no ping sweep either (ping is answered by the TCP/IP stack even when the
+    application side is wedged, so it proves less than the broadcast does).
+
+    The handshakes run serially and with the generous RETRY_TLS_TIMEOUT
+    rather than concurrently: a lone handshake against a real board costs
+    ~1.2s (RSA-2048 on its Cortex-M4F), and running several at once is
+    exactly what made real boards time out during the old full sweep. For
+    the handful of boards a bench has, serial is both fast enough and the
+    variant that never loses one."""
+    boards = broadcast_discover(base_ip, timeout=timeout)
+    results = []
+    for done, b in enumerate(boards, 1):
+        probe, _tcp_ok = _probe(b["ip"], timeout=RETRY_TLS_TIMEOUT)
+        results.append({"ip": b["ip"], "mac": b["mac"],
+                        "fingerprint_sha256": probe["fingerprint_sha256"] if probe else None})
+        if progress:
+            progress(done, len(boards))
+    return results
+
+
 def scan_subnet(base_ip: str, max_workers: int = MAX_WORKERS, progress=None):
     """Scan the /24 containing base_ip, return a list of {ip, fingerprint_sha256}
     dicts for every host that completed our mutual-TLS handshake, sorted by IP.
@@ -285,19 +336,19 @@ def scan_subnet(base_ip: str, max_workers: int = MAX_WORKERS, progress=None):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base-ip", required=True, help="any IP in the /24 to scan, e.g. 192.168.0.12")
+    ap.add_argument("--base-ip", required=True, help="any IP in the /24 to look on, e.g. 192.168.0.12")
+    # The full sweep is opt-in, never the default - see the module docstring
+    # for why (ARP-broadcast load bridged onto the T1S segment). --broadcast
+    # is kept as an accepted no-op so older notes/scripts still run.
+    ap.add_argument("--tls-scan", action="store_true",
+                    help="opt-in: full /24 TCP+mutual-TLS sweep on port 23 instead of the "
+                         "broadcast - slower and noisy, but yields a CA-verified fingerprint "
+                         "per board (see scan_subnet())")
     ap.add_argument("--broadcast", action="store_true",
-                    help="use the fast UDP broadcast protocol instead of the TLS subnet scan "
-                         "(no fingerprint - just IP+MAC, see broadcast_discover())")
+                    help=argparse.SUPPRESS)   # deprecated: broadcast is the default now
     args = ap.parse_args()
 
-    if args.broadcast:
-        results = broadcast_discover(args.base_ip)
-        if not results:
-            print("no boards found")
-        for r in results:
-            print("%-15s  %s" % (r["ip"], r["mac"]))
-    else:
+    if args.tls_scan:
         def _progress(done, total):
             print("\rscanning... %d/%d" % (done, total), end="", flush=True)
 
@@ -307,3 +358,10 @@ if __name__ == "__main__":
             print("no boards found")
         for r in results:
             print("%-15s  %s" % (r["ip"], r["fingerprint_sha256"]))
+    else:
+        results = discover_boards(args.base_ip)
+        if not results:
+            print("no boards answered the broadcast")
+        for r in results:
+            print("%-15s  %-17s  %s" % (r["ip"], r["mac"],
+                                        r["fingerprint_sha256"] or "(no mTLS handshake)"))

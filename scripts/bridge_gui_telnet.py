@@ -1624,9 +1624,11 @@ class BridgeGUITelnet:
         paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # LEFT: two stacked sections - what's actually out there on the wire
-        # right now (discover.py, a plain TCP+mTLS subnet scan - see its
-        # module docstring for why not mDNS), and what we've issued a PKI
-        # identity for (json/boards/*.json) - two different questions, since
+        # right now (discover.py's discover_boards(): UDP broadcast to find
+        # the boards, then mTLS against each answer for its fingerprint - one
+        # button, no subnet sweep, see its module docstring), and what we've
+        # issued a PKI identity for (json/boards/*.json) - two different
+        # questions, since
         # a board can be reachable without an identity yet, or have an
         # identity but be powered off/unreachable right now.
         left_paned = ttk.PanedWindow(paned, orient=tk.VERTICAL)
@@ -1637,12 +1639,9 @@ class BridgeGUITelnet:
 
         discover_btns = ttk.Frame(discover_frame)
         discover_btns.pack(fill=tk.X, pady=(0, 4))
-        self.cert_broadcast_button = ttk.Button(discover_btns, text="Broadcast Discover (fast)",
-                                                command=self.cert_broadcast_discover)
-        self.cert_broadcast_button.pack(fill=tk.X, side=tk.LEFT, expand=True)
-        self.cert_scan_button = ttk.Button(discover_btns, text="TLS Scan (slow, verifies CA)",
+        self.cert_scan_button = ttk.Button(discover_btns, text="Discover Boards",
                                            command=self.cert_scan_network)
-        self.cert_scan_button.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=(4, 0))
+        self.cert_scan_button.pack(fill=tk.X, expand=True)
 
         discover_columns = ("ip", "mac", "board_id", "fingerprint")
         self.discover_tree = ttk.Treeview(discover_frame, columns=discover_columns, show="headings", height=6)
@@ -1719,57 +1718,53 @@ class BridgeGUITelnet:
                        (len(pki.list_boards()), "y" if len(pki.list_boards()) == 1 else "ies"))
 
     def cert_scan_network(self):
+        """The one discovery action (discover.py, discover_boards()): UDP
+        broadcast to find the boards - they answer for themselves with
+        MAC+IP, near-instant, and nothing is touched that isn't a board -
+        then one mutual-TLS handshake against each answer for the
+        CA-verified fingerprint the broadcast cannot prove. No /24 sweep and
+        no ping sweep: the first floods ARP onto the bridged T1S segment
+        (which has wedged the bench before), the second proves less than the
+        broadcast does since the TCP/IP stack answers ping even when the
+        application side is wedged. The sweep is still reachable, but only
+        as `discover.py --tls-scan`, for a board whose discovery responder
+        is down or whose firmware predates it.
+
+        A board with no fingerprint in the list answered the broadcast but
+        did not complete the handshake - that is shown, not hidden: it is
+        exactly the factory-fresh board that has no identity from our CA
+        yet, which is the case this tab exists to fix."""
         base_ip = self.ip_var.get().strip()
         if not base_ip:
             messagebox.showinfo("No base IP", "Enter any IP on the target /24 in the IP field above first.")
             return
         self.discover_tree.delete(*self.discover_tree.get_children())
-        self.cert_scan_button.config(state=tk.DISABLED, text="Scanning...")
-        self._cert_log("TLS-scanning %s.0/24 (port 23, our CA)..." % ".".join(base_ip.split(".")[:3]))
+        self.cert_scan_button.config(state=tk.DISABLED, text="Discovering...")
+        self._cert_log("Broadcasting on %s.255, then TLS-probing every answer..."
+                       % ".".join(base_ip.split(".")[:3]))
 
         def worker():
             try:
+                # Fingerprint first, IP only as a fallback: the fingerprint
+                # is what actually identifies a board, an IP is just where it
+                # happened to be when its identity was issued.
                 by_fp = {b["fingerprint_sha256"].replace(":", "").lower(): b["board_id"]
-                        for b in pki.list_boards()}
-                results = discover.scan_subnet(base_ip)
-                rows = []
-                for r in results:
-                    fp = r["fingerprint_sha256"]
-                    fp_display = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
-                    board_id = by_fp.get(fp, "(unregistered)")
-                    rows.append((r["ip"], "", board_id, fp_display))
-                self.result_queue.put(("discover_results", rows, "scan"))
-            except Exception as e:
-                self.result_queue.put(("cert_log", "Scan failed: %s" % e))
-                self.result_queue.put(("discover_results", [], "scan"))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def cert_broadcast_discover(self):
-        """Fast path: firmware/src/app.c's plaintext UDP broadcast responder
-        (Discovery_Tasks()) - one broadcast, replies carry MAC+IP only, no
-        TLS/trust involved. Replaced an mDNS-SD attempt that never actually
-        answered a query (see docs/session-log.md, 2026-09-06) - this is what
-        finds a board BEFORE it shares any certificate with us at all, e.g.
-        a factory-fresh board still on its compiled-in default identity."""
-        base_ip = self.ip_var.get().strip()
-        if not base_ip:
-            messagebox.showinfo("No base IP", "Enter any IP on the target /24 in the IP field above first.")
-            return
-        self.discover_tree.delete(*self.discover_tree.get_children())
-        self.cert_broadcast_button.config(state=tk.DISABLED, text="Broadcasting...")
-        self._cert_log("Broadcasting on %s.255..." % ".".join(base_ip.split(".")[:3]))
-
-        def worker():
-            try:
+                         for b in pki.list_boards()}
                 by_ip = {b.get("ip", ""): b["board_id"] for b in pki.list_boards() if b.get("ip")}
-                results = discover.broadcast_discover(base_ip)
-                rows = [(r["ip"], r["mac"], by_ip.get(r["ip"], "(unregistered)"), "")
-                        for r in results]
-                self.result_queue.put(("discover_results", rows, "broadcast"))
+                rows = []
+                for r in discover.discover_boards(base_ip):
+                    fp = r["fingerprint_sha256"]
+                    if fp:
+                        fp_display = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
+                        board_id = by_fp.get(fp) or by_ip.get(r["ip"], "(unregistered)")
+                    else:
+                        fp_display = "(no mTLS handshake)"
+                        board_id = by_ip.get(r["ip"], "(unregistered)")
+                    rows.append((r["ip"], r["mac"], board_id, fp_display))
+                self.result_queue.put(("discover_results", rows, "discover"))
             except Exception as e:
-                self.result_queue.put(("cert_log", "Broadcast discovery failed: %s" % e))
-                self.result_queue.put(("discover_results", [], "broadcast"))
+                self.result_queue.put(("cert_log", "Discovery failed: %s" % e))
+                self.result_queue.put(("discover_results", [], "discover"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2809,17 +2804,14 @@ Example commands (Quick Commands buttons, or typed in the Terminal tab):
                     messagebox.showerror("MQTT", "Broker failed to start:\n%s" % error)
 
                 elif result[0] == "discover_results":
-                    _, rows, source = result
+                    _, rows, _source = result
                     self.discover_tree.delete(*self.discover_tree.get_children())
                     for ip, mac, board_id, fp_display in rows:
                         self.discover_tree.insert("", tk.END, values=(ip, mac, board_id, fp_display))
-                    if source == "broadcast":
-                        self.cert_broadcast_button.config(state=tk.NORMAL, text="Broadcast Discover (fast)")
-                    else:
-                        self.cert_scan_button.config(state=tk.NORMAL, text="TLS Scan (slow, verifies CA)")
-                    self._cert_log("%s done: %d board%s found" %
-                                   ("Broadcast" if source == "broadcast" else "Scan",
-                                    len(rows), "" if len(rows) == 1 else "s"))
+                    self.cert_scan_button.config(state=tk.NORMAL, text="Discover Boards")
+                    verified = sum(1 for r in rows if not r[3].startswith("("))
+                    self._cert_log("Discovery done: %d board%s found, %d verified over mTLS" %
+                                   (len(rows), "" if len(rows) == 1 else "s", verified))
 
                 elif result[0] == "op_line":
                     # One line right away, not collected until the end - that is the
