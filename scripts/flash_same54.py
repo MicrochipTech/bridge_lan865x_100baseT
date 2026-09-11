@@ -192,14 +192,26 @@ def run_pyocd(args, dry_run=False):
 # real board): pyOCD then loads the FLM, but its ProgramPage fills each 16-byte quad word
 # as +0, +12, +8, +4 and issues WQW without setting ADDR - the first 4 bytes of the page
 # came back erased (0xFF). That word holds BOD33, BOOTPROT and the factory BOD12
-# calibration (datasheet 9.4: must not be changed). fuses.bat changes fuses without that
-# algorithm - see fuse_programmer.py.
+# calibration (datasheet 9.4: must not be changed). To change fuses: fuses.bat where this
+# checkout has it (it drives NVMCTRL without that algorithm), otherwise MPLAB X or IPE.
 PYOCD_LOG_FILTERS = ["-L", "pyocd.coresight.discovery=critical",
                      "-L", "pyocd.target.pack.cmsis_pack=error"]
+# The filters were verified with this pyOCD only - the version setup.bat installs. Another
+# version may name its loggers or its -L option differently, and a flash must never fail
+# over cosmetics: with any other version it runs unfiltered, noise and all.
+PYOCD_LOG_FILTER_VERSIONS = ("0.43.0",)
+
+
+def pyocd_log_filters():
+    try:
+        from importlib.metadata import version
+        return list(PYOCD_LOG_FILTERS) if version("pyocd") in PYOCD_LOG_FILTER_VERSIONS else []
+    except Exception:
+        return []
 
 
 def build_common_args(target, pack, probe, frequency):
-    args = ["-t", target, "-f", str(frequency)] + PYOCD_LOG_FILTERS
+    args = ["-t", target, "-f", str(frequency)] + pyocd_log_filters()
     if pack:
         args += ["--pack", str(pack)]
     if probe:
@@ -210,27 +222,34 @@ def build_common_args(target, pack, probe, frequency):
 # SAME54 NVM User Row (fuses), 512 bytes - never programmed by this tool, see above.
 USER_ROW_START = 0x00804000
 USER_ROW_END = 0x00804200
+# The repo's fuse tool, named in the note after a flash only where this checkout has it.
+FUSES_TOOL = Path(__file__).parent.parent / "fuses.bat"
 
 
 def strip_user_row(image, workdir):
     """Return (image to hand to pyOCD, whether User Row data was removed).
 
     For a .hex that carries fuse data, writes a copy without it into workdir. Everything
-    else is passed through untouched - an .elf still gets pyOCD's own warning."""
+    else is passed through untouched - an .elf still gets pyOCD's own warning - and so is
+    a .hex this cannot rewrite: stripping the fuses must never cost a flash."""
     if image.suffix.lower() != ".hex":
         return image, False
-    from intelhex import IntelHex
+    try:
+        from intelhex import IntelHex
 
-    ih = IntelHex(str(image))
-    removed = False
-    for start, end in ih.segments():
-        for address in range(max(start, USER_ROW_START), min(end, USER_ROW_END)):
-            del ih[address]
-            removed = True
-    if not removed:
+        ih = IntelHex(str(image))
+        removed = False
+        for start, end in ih.segments():
+            for address in range(max(start, USER_ROW_START), min(end, USER_ROW_END)):
+                del ih[address]
+                removed = True
+        if not removed:
+            return image, False
+        stripped = Path(workdir) / image.name
+        ih.write_hex_file(str(stripped))
+    except Exception as exc:
+        print(f"Note: could not take the fuses out of {image.name} ({exc}) - flashing it unchanged.")
         return image, False
-    stripped = Path(workdir) / image.name
-    ih.write_hex_file(str(stripped))
     return stripped, True
 
 
@@ -245,8 +264,12 @@ def flash(image, target, pack, probe, frequency, reset, dry_run):
         verb = "will be" if dry_run else "were"
         print()
         print(f"[note ] The fuses (NVM User Row, 0x{USER_ROW_START:08X}) in this image {verb} deliberately")
-        print("        NOT programmed - the board keeps its current fuse settings. fuses.bat")
-        print("        compares them with this image; fuses.bat --write-from-hex writes them.")
+        if FUSES_TOOL.is_file():
+            print("        NOT programmed - the board keeps its current fuse settings. fuses.bat")
+            print("        compares them with this image; fuses.bat --write-from-hex writes them.")
+        else:
+            print("        NOT programmed - the board keeps its current fuse settings. To change")
+            print("        them, use MPLAB X or IPE.")
     return rc
 
 
