@@ -175,8 +175,43 @@ def run_pyocd(args, dry_run=False):
     return subprocess.call(cmd)
 
 
+# pyOCD log noise that says nothing about this board, filtered per logger (-L) so every
+# other message still gets through. Both verified harmless on a real board 2026-09-11:
+# - coresight.discovery: pyOCD scans debug APs until it has seen three invalid ones. The
+#   SAME54 answers an unused APSEL with a FAULT ACK instead of an all-zero IDR, which
+#   pyOCD logs as "E Error probing AP#2..#4" before ending the scan exactly as intended.
+# - target.pack.cmsis_pack: "Overlapping memory regions ... (ATSAME54N19A)" is about a
+#   different device's entry in the same DFP, parsed along with ours.
+# The User Row (fuses) at 0x00804000 is not handled by a log filter but taken out of the
+# image before pyOCD sees it (strip_user_row below), and flash() says so at the end.
+# Left in, pyOCD would only warn "no memory region defined for address 0x00804000" in the
+# middle of the output, and a logger filter would hide that warning for any other address
+# too. pyOCD has no region there: the DFP tags its ATSAME54_USER_ROW.FLM algorithm
+# style="CMSIS", and pyOCD 0.43 skips every algorithm whose style is not "Keil"
+# (cmsis_pack.py, _extract_algos). Removing that tag is NOT a fix (tested 2026-09-11 on a
+# real board): pyOCD then loads the FLM, but its ProgramPage fills each 16-byte quad word
+# as +0, +12, +8, +4 and issues WQW without setting ADDR - the first 4 bytes of the page
+# came back erased (0xFF). That word holds BOD33, BOOTPROT and the factory BOD12
+# calibration (datasheet 9.4: must not be changed). To change fuses: fuses.bat where this
+# checkout has it (it drives NVMCTRL without that algorithm), otherwise MPLAB X or IPE.
+PYOCD_LOG_FILTERS = ["-L", "pyocd.coresight.discovery=critical",
+                     "-L", "pyocd.target.pack.cmsis_pack=error"]
+# The filters were verified with this pyOCD only - the version setup.bat installs. Another
+# version may name its loggers or its -L option differently, and a flash must never fail
+# over cosmetics: with any other version it runs unfiltered, noise and all.
+PYOCD_LOG_FILTER_VERSIONS = ("0.43.0",)
+
+
+def pyocd_log_filters():
+    try:
+        from importlib.metadata import version
+        return list(PYOCD_LOG_FILTERS) if version("pyocd") in PYOCD_LOG_FILTER_VERSIONS else []
+    except Exception:
+        return []
+
+
 def build_common_args(target, pack, probe, frequency):
-    args = ["-t", target, "-f", str(frequency)]
+    args = ["-t", target, "-f", str(frequency)] + pyocd_log_filters()
     if pack:
         args += ["--pack", str(pack)]
     if probe:
@@ -184,13 +219,57 @@ def build_common_args(target, pack, probe, frequency):
     return args
 
 
+# SAME54 NVM User Row (fuses), 512 bytes - never programmed by this tool, see above.
+USER_ROW_START = 0x00804000
+USER_ROW_END = 0x00804200
+# The repo's fuse tool, named in the note after a flash only where this checkout has it.
+FUSES_TOOL = Path(__file__).parent.parent / "fuses.bat"
+
+
+def strip_user_row(image, workdir):
+    """Return (image to hand to pyOCD, whether User Row data was removed).
+
+    For a .hex that carries fuse data, writes a copy without it into workdir. Everything
+    else is passed through untouched - an .elf still gets pyOCD's own warning - and so is
+    a .hex this cannot rewrite: stripping the fuses must never cost a flash."""
+    if image.suffix.lower() != ".hex":
+        return image, False
+    try:
+        from intelhex import IntelHex
+
+        ih = IntelHex(str(image))
+        removed = False
+        for start, end in ih.segments():
+            for address in range(max(start, USER_ROW_START), min(end, USER_ROW_END)):
+                del ih[address]
+                removed = True
+        if not removed:
+            return image, False
+        stripped = Path(workdir) / image.name
+        ih.write_hex_file(str(stripped))
+    except Exception as exc:
+        print(f"Note: could not take the fuses out of {image.name} ({exc}) - flashing it unchanged.")
+        return image, False
+    return stripped, True
+
+
 def flash(image, target, pack, probe, frequency, reset, dry_run):
     common = build_common_args(target, pack, probe, frequency)
-    rc = run_pyocd(["flash"] + common + [str(image)], dry_run)
-    if rc != 0:
-        return rc
-    if reset:
-        rc = run_pyocd(["reset"] + common, dry_run)
+    with tempfile.TemporaryDirectory(prefix="flash_same54_") as workdir:
+        to_flash, fuses_skipped = strip_user_row(Path(image), workdir)
+        rc = run_pyocd(["flash"] + common + [str(to_flash)], dry_run)
+        if rc == 0 and reset:
+            rc = run_pyocd(["reset"] + common, dry_run)
+    if rc == 0 and fuses_skipped:
+        verb = "will be" if dry_run else "were"
+        print()
+        print(f"[note ] The fuses (NVM User Row, 0x{USER_ROW_START:08X}) in this image {verb} deliberately")
+        if FUSES_TOOL.is_file():
+            print("        NOT programmed - the board keeps its current fuse settings. fuses.bat")
+            print("        compares them with this image; fuses.bat --write-from-hex writes them.")
+        else:
+            print("        NOT programmed - the board keeps its current fuse settings. To change")
+            print("        them, use MPLAB X or IPE.")
     return rc
 
 
