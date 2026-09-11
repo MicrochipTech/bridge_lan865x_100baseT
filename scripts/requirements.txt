@@ -11,7 +11,9 @@
 pyserial==3.5
 
 # Flashing and register access over the EDBG probe: flash_same54.py,
-# install_prereqs.py                                                   (used by: 2)
+# fuses_same54.py, probes.py, install_prereqs.py                       (used by: 4)
+# Brings intelhex along, which flash_same54.py and fuses_same54.py import for
+# HEX images - pyOCD pins its own version, so it gets no line of its own here.
 #
 # PINNED, and not as a precaution ritual: 0.44.1 breaks the SWD connection on
 # this setup. The same version is PYOCD_PIN in install_prereqs.py - change it

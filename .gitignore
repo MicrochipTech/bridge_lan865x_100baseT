@@ -64,3 +64,8 @@ certs/boards/
 certs/client/
 certs/mqtt/
 json/boards/
+
+# Fuse backups written by fuses.bat before every fuse write (scripts/fuses_same54.py):
+# one chip's factory calibration and settings, bound to that chip's serial number.
+# Meaningless on any other board - fuses.bat refuses to restore one there anyway.
+json/fuse_backups/

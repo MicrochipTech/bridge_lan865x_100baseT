@@ -183,6 +183,13 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
 
 - `build.bat` / `flash.bat` / `setup.bat`: MPLAB-X-Makefile build wrapper
   plus a pyOCD flasher with probe auto-detect — see [§5](#5-building-it-yourself).
+- `fuses.bat` — the board's fuses (NVM User Row) by name, next to the fuses
+  MCC put into the release HEX, and programs them on request (`--set`,
+  `--write-from-hex`, `--restore`), backup first. `flash.bat` never programs fuses.
+- `probes.bat` — the connected debug probes with their serials and COM ports,
+  which one `json\bench.json` selects and which board each is wired to
+  (`json\boards\`);
+  `--chip` adds the device and chip serial behind each, without halting it.
 - `cli.py` / `cli.bat` — send CLI commands and collect answers over the EDBG
   COM port (115200 8N1).
 - `run_gui.bat` / `run_gui_telnet.bat` — status/configuration GUIs, one per
@@ -194,7 +201,10 @@ raw-Ethernet loopback test (`noip_send`), LAN865x register peek/poke
   folders and the MQTT broker act on the machine running the server, not the one
   running the browser.
 - `run_tests.bat` — the host-side tests that need no hardware: both front ends
-  against a simulated board (`scripts\test_bridge_core_sim.py`), and the web UI
+  against a simulated board (`scripts\test_bridge_core_sim.py`), the fuse
+  decoding and programming behind `fuses.bat` (`scripts\test_fuses_same54.py`,
+  `scripts\test_fuse_programmer.py`), the probe list behind `probes.bat`
+  (`scripts\test_probes.py`), and the web UI
   against a simulated browser client (`scripts\test_web_ui.py`).
 - `run_term.bat` — three serial consoles (this bridge plus two T1S follower
   boards on this bench) in one window.
@@ -527,7 +537,11 @@ procedure, from an empty checkout to a provisioned bench, is
 build.bat                    :: incremental build (build.bat rebuild = clean, build.bat clean)
 flash.bat                     :: program the board via pyOCD and release it from reset
 flash.bat --list              :: list connected probes
+probes.bat                    :: the same with COM port, bench.json selection and board; --chip adds the chip
 flash.bat --probe <serial>    :: pick a probe for this run only
+fuses.bat                     :: show the board's fuses by name, next to the release HEX's (read-only)
+fuses.bat --set FIELD=VALUE   :: change a fuse field: shows the change, saves a backup, asks first
+fuses.bat -help               :: every fuses.bat option, with examples
 install.bat --select          :: change which board flash.bat programs from now on
 ```
 
@@ -551,6 +565,20 @@ local build instead, pass the `dist\` path explicitly:
 ```bat
 flash.bat firmware\tcpip_iperf_lan865x.X\dist\default\production\tcpip_iperf_lan865x.X.production.hex
 ```
+
+**`flash.bat` never programs the fuses.** The HEX also carries MCC's fuse settings
+(the NVM User Row at `0x00804000`), but `flash.bat` strips them before flashing
+and says so at the end: pyOCD cannot program that area with the flash algorithm
+Microchip's pack ships (tested on a board, see `scripts\flash_same54.py`), and a
+verbatim write would also replace the board's factory calibration bits with the
+HEX's zeros. `fuses.bat` shows the board's fuses by name next to the image's, and
+changes them when asked: `fuses.bat --set WDT_PER=CYC16384`, or `--write-from-hex`
+for all of MCC's values. It builds the new fuse page from the board's own, so the
+calibration bits stay untouched, shows the change, saves a backup to
+`json\fuse_backups\` and asks before it writes; it drives the flash controller
+directly instead of the pack's broken algorithm, and resets only after the page
+reads back correctly. `fuses.bat --restore <backup>` puts a backup back — onto the
+chip it was taken from only, recognised by its serial number.
 
 ### 5.4 Everyday CLI / GUI access
 
